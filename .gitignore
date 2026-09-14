@@ -1,0 +1,18 @@
+# Build output. Everything here is reproducible from source.
+*.o
+*.elf
+*.mod
+*.bin
+output/
+__pycache__/
+*.pyc
+
+# Your own configuration and your own copy of the game. Neither belongs here:
+# this repository contains no game code, no game assets and no executable.
+mc3boot.ini
+*.ELF
+*.iso
+*.p2s
+
+# Generated headers ARE committed - see docs/GENERATED.md for why, and for how
+# to regenerate them against a different build of the game.

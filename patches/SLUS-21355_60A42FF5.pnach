@@ -1,0 +1,149 @@
+gametitle=Midnight Club 3: DUB Edition Remix (SLUS-21355)
+comment=HostFS - arquivos soltos + correcao de streams.dat > 2 GiB
+
+// =====================================================================
+//  ATENCAO: estes patches AGORA ESTAO EM GRUPOS. Antes eram aplicados
+//  sempre; agora comecam DESMARCADOS na aba de cheats do PCSX2.
+//  Sem marcar "Arquivos soltos", o jogo volta a ler os .DAT e o HostFS
+//  nao serve para nada.
+//
+//  Requisitos:
+//    * PCSX2: Settings > Emulation > "Enable Host Filesystem" = ON
+//    * PCSX2: Settings > Cheats (Enable Cheats) = ON
+//    * Ao lado do ELF:  ASSETS\  ASSETSudioanks\  SYSTEM//
+//  Cada linha aparece duas vezes: patch=0 aplica uma vez ao carregar o ELF
+//  (necessario tao cedo para os caminhos do IOP) e patch=1 mantem todo
+//  quadro. (Existe patch=2 = os dois juntos, mas deixei como estava para
+//  nao mexer no que ja funciona.)
+// =====================================================================
+
+[HostFS\Arquivos soltos - NECESSARIO]
+description=Le ASSETS, banks e modulos do IOP de pastas soltas em vez dos .DAT. E a base de todo o resto: sem isto o HostFS nao faz nada.
+patch=0,EE,001A0DC8,word,24A57DDD
+patch=0,EE,00398404,word,24020000
+patch=0,EE,00398580,word,24060005
+patch=0,EE,0039865C,word,24060005
+patch=0,EE,0042BCFC,word,24030000
+patch=0,EE,00432314,word,00000000
+patch=0,EE,0043465C,word,10620006
+patch=0,EE,004BAE10,word,24050350
+patch=0,EE,004BAE34,word,24050000
+patch=0,EE,004BB244,word,24060000
+patch=0,EE,00615AF4,word,00640D8F
+patch=0,EE,00617F84,word,0065C51C
+patch=0,EE,00618E64,word,3273702E
+patch=0,EE,00618E68,word,79707374
+patch=0,EE,006192AC,word,3273702E
+patch=0,EE,006192B0,word,79707374
+patch=0,EE,00637CE0,word,616E642F
+patch=0,EE,00637CE4,word,65722E73
+patch=0,EE,00637CE8,word,0000006C
+patch=0,EE,00637CEC,word,00000000
+patch=0,EE,00637CF0,word,00000000
+patch=0,EE,00637CF4,word,00000000
+patch=0,EE,00637CF8,word,00000000
+patch=0,EE,00637CFC,word,00000000
+patch=0,EE,00637D00,word,00000000
+patch=0,EE,00637DCC,word,41007373
+patch=0,EE,00637DD0,word,54455353
+patch=0,EE,00637DD4,word,00000053
+patch=0,EE,00637DD8,word,00000000
+patch=0,EE,00640DEC,word,5300313B
+patch=0,EE,00640DF0,word,45545359
+patch=0,EE,00640DF4,word,00005C4D
+patch=0,EE,00640DF8,word,00000000
+patch=0,EE,00640DFC,word,00000000
+patch=0,EE,00640E00,word,00000000
+patch=0,EE,00640E04,word,00000000
+patch=0,EE,00640E08,word,00000000
+patch=0,EE,00659B0C,word,5C3A3074
+patch=0,EE,00659B10,word,5547544E
+patch=0,EE,00659B14,word,44564449
+patch=0,EE,00659B18,word,464C452E
+patch=0,EE,00659B1C,word,00000000
+patch=0,EE,00659B20,word,00000000
+patch=0,EE,0065C52C,word,58453A74
+patch=0,EE,0065C530,word,633A4345
+patch=0,EE,0065C534,word,7261656C
+patch=0,EE,0065C538,word,64616572
+patch=0,EE,0065C53C,word,796C6E6F
+patch=0,EE,0065C540,word,6578652E
+patch=0,EE,0065C544,word,68000020
+patch=0,EE,0065C548,word,3A74736F
+patch=0,EE,0065C54C,word,43455845
+patch=0,EE,0065C550,word,6900003A
+patch=1,EE,001A0DC8,word,24A57DDD
+patch=1,EE,00398404,word,24020000
+patch=1,EE,00398580,word,24060005
+patch=1,EE,0039865C,word,24060005
+patch=1,EE,0042BCFC,word,24030000
+patch=1,EE,00432314,word,00000000
+patch=1,EE,0043465C,word,10620006
+patch=1,EE,004BAE10,word,24050350
+patch=1,EE,004BAE34,word,24050000
+patch=1,EE,004BB244,word,24060000
+patch=1,EE,00615AF4,word,00640D8F
+patch=1,EE,00617F84,word,0065C51C
+patch=1,EE,00618E64,word,3273702E
+patch=1,EE,00618E68,word,79707374
+patch=1,EE,006192AC,word,3273702E
+patch=1,EE,006192B0,word,79707374
+patch=1,EE,00637CE0,word,616E642F
+patch=1,EE,00637CE4,word,65722E73
+patch=1,EE,00637CE8,word,0000006C
+patch=1,EE,00637CEC,word,00000000
+patch=1,EE,00637CF0,word,00000000
+patch=1,EE,00637CF4,word,00000000
+patch=1,EE,00637CF8,word,00000000
+patch=1,EE,00637CFC,word,00000000
+patch=1,EE,00637D00,word,00000000
+patch=1,EE,00637DCC,word,41007373
+patch=1,EE,00637DD0,word,54455353
+patch=1,EE,00637DD4,word,00000053
+patch=1,EE,00637DD8,word,00000000
+patch=1,EE,00640DEC,word,5300313B
+patch=1,EE,00640DF0,word,45545359
+patch=1,EE,00640DF4,word,00005C4D
+patch=1,EE,00640DF8,word,00000000
+patch=1,EE,00640DFC,word,00000000
+patch=1,EE,00640E00,word,00000000
+patch=1,EE,00640E04,word,00000000
+patch=1,EE,00640E08,word,00000000
+patch=1,EE,00659B0C,word,5C3A3074
+patch=1,EE,00659B10,word,5547544E
+patch=1,EE,00659B14,word,44564449
+patch=1,EE,00659B18,word,464C452E
+patch=1,EE,00659B1C,word,00000000
+patch=1,EE,00659B20,word,00000000
+patch=1,EE,0065C52C,word,58453A74
+patch=1,EE,0065C530,word,633A4345
+patch=1,EE,0065C534,word,7261656C
+patch=1,EE,0065C538,word,64616572
+patch=1,EE,0065C53C,word,796C6E6F
+patch=1,EE,0065C540,word,6578652E
+patch=1,EE,0065C544,word,68000020
+patch=1,EE,0065C548,word,3A74736F
+patch=1,EE,0065C54C,word,43455845
+patch=1,EE,0065C550,word,6900003A
+
+[HostFS\Correcao de streams.dat maior que 2 GiB]
+description=Troca sra por srl na conversao de offset em bytes para setor de DVD (deslocamento com sinal). So faz sentido se voce USA o streams.dat em vez de streams soltos.
+patch=0,EE,004F9D10,word,00052AC2
+patch=0,EE,004F9D34,word,00052AC2
+patch=0,EE,004F9D60,word,00052AC2
+patch=0,EE,004F9D8C,word,00052AC2
+patch=0,EE,004FA340,word,00102AC2
+patch=1,EE,004F9D10,word,00052AC2
+patch=1,EE,004F9D34,word,00052AC2
+patch=1,EE,004F9D60,word,00052AC2
+patch=1,EE,004F9D8C,word,00052AC2
+patch=1,EE,004FA340,word,00102AC2
+
+// ---- Loose STREAMS de ASSETSudio\streams\ (DESATIVADO) ------------
+//    0x447CB0:  sb a1,4(s0)  ->  sb zero,4(s0)
+//    Forcava o flag de origem do audio para 0 = "pasta solta". Quebrou todo
+//    o audio no teste; fica registrado para quem quiser retomar.
+//    Popular a pasta com (uma linha):
+//      python hash_build.py X streams.dat -o ASSETS/audio/streams -nl MC3_PS2_Streams.lst -a mclub
+// patch=0,EE,00447CB0,word,A2000004
+// patch=1,EE,00447CB0,word,A2000004

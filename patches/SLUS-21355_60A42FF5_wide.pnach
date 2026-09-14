@@ -1,0 +1,51 @@
+gametitle=Midnight Club 3: DUB Edition Remix (SLUS-21355)
+comment=Widescreen e resolucao - grupos selecionaveis
+
+// ---------------------------------------------------------------------------
+//  Agora tudo esta em grupos [..], entao cada bloco vira uma caixinha na aba
+//  de cheats do PCSX2. ATENCAO: patch sem grupo era aplicado sempre; com grupo
+//  ele comeca DESMARCADO. Marque o que voce usava.
+//
+//  Combinacao que estava rodando ate agora:
+//      Widescreen 16:9  +  Modo 640x448  +  Render targets 640  +  Sem motion blur
+//
+//  O grupo "Modo 640x480" e alternativo ao "Modo 640x448": marque um OU outro,
+//  nunca os dois (ambos escrevem o mesmo byte).
+//
+//  Por que a altura do render target do spotlight anda junto com o modo:
+//  gfxTexture::CreateRenderTarget(largura, altura, formato, ENDERECO_DE_VRAM)
+//  recebe endereco cru, e os alvos do mcSpotlight ficam em VRAM 0 e 0x2000 --
+//  em cima dos buffers de display. Com o display em 448, um alvo de 480
+//  ultrapassa o buffer e corrompe a VRAM do GS (luzes fora de lugar, carro
+//  enterrado no chao -- testado). Com o display em 480 eles voltam a casar.
+// ---------------------------------------------------------------------------
+
+[Video\Widescreen 16:9]
+description=Aspecto 4:3 -> 16:9 (0x3FAAAAAA -> 0x3FE38E34). Independente do modo de resolucao.
+patch=0,EE,00527e14,word,3c013fe3
+patch=0,EE,00527e18,word,34218e34
+patch=1,EE,00527e14,word,3c013fe3
+patch=1,EE,00527e18,word,34218e34
+
+[Video\Modo 640x448]
+description=Modo de video 1 = 640x448. O padrao deste pack. Alternativo ao grupo 640x480 - marque so um.
+patch=0,EE,204BF458,byte,01
+
+[Video\Modo 640x480 progressivo - EXPERIMENTAL]
+description=Modo de video 0 = 640x480, que o jogo ja implementa, mais a altura do render target do spotlight para 480 para casar com ele. Alternativo ao grupo 640x448 - marque so um. Se aparecer luz fora de lugar ou geometria afundada, desmarque: quer dizer que a VRAM nao fechou.
+patch=0,EE,204BF458,byte,00
+patch=1,EE,001D6DAC,byte,1e0
+patch=1,EE,001D6DB0,byte,280
+
+[Video\Render targets em 640 de largura]
+description=Largura 512 -> 640 nos alvos do spotlight e do post-fx, mais o corte do glow "HDR". So mexe em LARGURA, que nao depende do modo.
+patch=1,EE,001D6DB0,byte,280 //spotlight: largura 512 -> 640
+patch=1,EE,001C8310,byte,280 //post fx: largura 512 -> 640
+patch=1,EE,001C8314,byte,1e0 //post fx: altura 448 -> 480
+patch=1,EE,001C829C,word,00000000 //desativa o corte do glow "HDR"
+patch=1,EE,001C82AC,word,00000000 //desativa o corte do glow "HDR"
+patch=1,EE,001C828C,word,241E0280 //deslocamento do glow "HDR"
+
+[Video\Desativar motion blur]
+description=mcFbGlow::DrawRadialBlur vira jr $ra. Ja era quebrado no original e piora em resolucao maior.
+patch=1,EE,001CA488,word,03e00008

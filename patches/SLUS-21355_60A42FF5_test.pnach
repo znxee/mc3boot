@@ -1,0 +1,67 @@
+gametitle=Midnight Club 3: DUB Edition Remix (SLUS-21355)
+comment=Ajustes de carga da cidade e do trafego
+
+// ---------------------------------------------------------------------------
+//  ORCAMENTO DA CIDADE
+//
+//  mcGame::ApplyFrameRateConfig chama mcCity::SetIntendedFrameRate com um
+//  literal em 0x1A70F0. Esse numero vira limiar POR QUADRO no mcPVS
+//  (sub_25B048):
+//
+//      v = 60.0 / taxa
+//      campo[+0x710C] = v * 17.0
+//      campo[+0x7110] = v * 20.0
+//
+//  O jogo passa 30 e nunca reavalia. Com o patch de vblank rodando a 60 ou a
+//  120, a cidade continua gastando um orcamento dimensionado para 33 ms dentro
+//  de um quadro de 16 ou 8 ms -- ou seja, o valor errado ajuda a CAUSAR as
+//  quedas.
+//
+//  Marque UM grupo so, o que casa com a taxa que voce esta rodando.
+//  Sem nenhum marcado o jogo usa 30, como sempre usou.
+//
+//      taxa   limiares (+0x710C / +0x7110)
+//        30      34.0 / 40.0      <- original
+//        60      17.0 / 20.0
+//        90      11.3 / 13.3
+//       120       8.5 / 10.0
+//
+//  O preco e visual: orcamento mais apertado significa a cidade fazendo menos
+//  por quadro. Se perder detalhe demais, use a linha de uma taxa mais baixa que
+//  a real -- 60 rodando a 120, por exemplo, ainda e o dobro de apertado que o
+//  padrao, sem ser o maximo.
+//
+//  Nao existe versao "automatica" aqui: um patch so troca constante. Para o
+//  orcamento seguir o dt vivo seria preciso um payload (ver tools/modloader).
+// ---------------------------------------------------------------------------
+
+[Cidade\Orcamento para 60 fps]
+description=mcCity::SetIntendedFrameRate(60) em vez de 30. Marque so um dos grupos de orcamento, e o que casa com a sua taxa real.
+patch=1,EE,001A70F0,word,2405003C
+
+[Cidade\Orcamento para 90 fps]
+description=mcCity::SetIntendedFrameRate(90). Para PCSX2 com NTSC Frame Rate em 90 Hz.
+patch=1,EE,001A70F0,word,2405005A
+
+[Cidade\Orcamento para 120 fps]
+description=mcCity::SetIntendedFrameRate(120). Para PCSX2 com NTSC Frame Rate em 120 Hz - o caso em que o valor original de 30 esta 4x errado.
+patch=1,EE,001A70F0,word,24050078
+
+[Cidade\Orcamento para 240 fps]
+description=mcCity::SetIntendedFrameRate(240). Para PCSX2 com NTSC Frame Rate em 240 Hz - o caso em que o valor original de 30 esta 8x errado.
+patch=1,EE,001A70F0,word,240500F0
+
+[Cidade\Orcamento para 1 fps]
+description=mcCity::SetIntendedFrameRate(1). Para PCSX2 com NTSC Frame Rate em ? Hz
+patch=1,EE,001A70F0,word,24050001
+
+// ---------------------------------------------------------------------------
+//  aiAmbientTrafficData::SetDefaultVehicleDrawLodDist2 chama a funcao real com
+//  escala 1.0, que monta quatro distancias AO QUADRADO: (e*50), (e*100),
+//  (e*200), (e*225). Dobrar a escala leva de 50/100/200/225 para
+//  100/200/400/450 -- e dobra o que precisa ser desenhado.
+// ---------------------------------------------------------------------------
+
+[Trafego\Distancia de desenho x2]
+description=Escala 1.0 -> 2.0 nas quatro distancias de LOD do trafego (50/100/200/225 -> 100/200/400/450). Custa desenho: a 120 fps pode ser o que derruba a taxa.
+patch=1,EE,0021DDD4,word,3C014000

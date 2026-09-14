@@ -1,0 +1,64 @@
+gametitle=Midnight Club 3 - DUB Edition Remix [SLUS-21355] (US)
+comment=mcCityEnvMap - qualidade do mapa de reflexo
+
+// ---------------------------------------------------------------------------
+//  REESCRITO 2026-08-17 depois de ler o codigo.
+//
+//  A versao anterior mirava no CONSTRUTOR (sub_561378, chamado por
+//  mcCity::LoadConditions). So que o construtor e engolido: logo depois vem
+//  mcCityEnvMap::Initialize, que reescreve os mesmos campos. Por isso apenas o
+//  patch da flag HQ funcionava -- e o unico campo que o Initialize LE e nunca
+//  reescreve.
+//
+//  Mapa dos campos do objeto e quem manda de verdade:
+//
+//    +0x0C  flag de qualidade   ctor 0x5613CC   Initialize so LE      -> patch vale
+//    +0x20  largura             ctor 0x561414   Initialize 0x56157C   -> ctor inerte
+//    +0x24  altura              ctor 0x561414   Initialize 0x561588   -> ctor inerte
+//    +0x40  FOV                 ctor 0x5613C4   Initialize 0x561668/0x5616B8
+//    +0xB8  intensidade         ctor 0x56149C   Initialize 0x561658/694/6A8
+//
+//  E o "far plane" nao era campo nenhum: SetupCam chama
+//  gfxViewport::Perspective(fov=+0x40, aspect, near, far) com near e far
+//  LITERAIS em 0x562580 e 0x562588. O far ja e 1000.0 -- o patch antigo tentava
+//  levar 100 para 1000 num campo (+0xBC) que nao e o far plane.
+// ---------------------------------------------------------------------------
+
+[Graphical\Reflexo - Qualidade alta]
+description=Forca o mapa de reflexo de alta qualidade. Unico patch da versao antiga que funcionava, porque +0x0C nao e reescrito pelo Initialize.
+patch=1,EE,005613CC,word,240C0000
+
+[Graphical\Reflexo - Mapa 512x512]
+description=Mapa de reflexo 512x512 em vez de 256x256. Sao TRES literais: a largura e a altura do campo, mais a altura do render target "EnvMap Color", que e literal e nao le o campo. VRAM do GS: cor 256KB->1MB, profundidade 128KB->512KB, de 4MB no total.
+patch=1,EE,0056157C,word,24020200   // +0x20 largura 256 -> 512
+patch=1,EE,00561588,word,24020200   // +0x24 altura  256 -> 512
+patch=1,EE,00561598,word,24080200   // altura literal do "EnvMap Color"
+
+[Graphical\Reflexo - FOV 150 (cidade)]
+description=FOV da captura do reflexo na cidade: 140 -> 150. O valor do construtor (0x5613C4) e inerte; este e o que vale.
+patch=1,EE,005616B8,word,3C014316
+
+[Graphical\Reflexo - FOV 150 (garagem)]
+description=Mesmo FOV -> 150 para o caminho da garagem, cujo valor original e 100 e nao 140.
+patch=1,EE,00561668,word,3C014316
+
+[Graphical\Reflexo - Far plane 2000]
+description=Far plane da camera do reflexo: 1000 -> 2000, literal em SetupCam. Aumenta a distancia que aparece no reflexo (e o custo de desenha-la).
+patch=1,EE,00562588,word,3C0144FA
+
+[Graphical\Reflexo - Intensidade 0.50]
+description=Intensidade do reflexo (+0xB8): os dois caminhos da cidade sao 0.374 e 0.150, o da garagem 0.374. Todos para 0.50. A versao antiga escrevia 0.35 sobre 0.374, que e 6% de diferenca e por isso nao se via nada.
+patch=1,EE,00561658,word,3C013F00   // garagem   0.374 -> 0.50
+patch=1,EE,0056165C,word,34210000
+patch=1,EE,00561694,word,3C013F00   // cidade A  0.150 -> 0.50
+patch=1,EE,00561698,word,34210000
+patch=1,EE,005616A8,word,3C013F00   // cidade B  0.374 -> 0.50
+patch=1,EE,005616AC,word,34210000
+
+; near plane em 0x562580 = 0.25 (li.s $f14) se um dia precisar
+; dosagens de intensidade (troque os dois words de cada linha):
+;  0.25 -> 3C013E80 / 34210000
+;  0.35 -> 3C013EB3 / 34213333
+;  0.50 -> 3C013F00 / 34210000
+;  0.75 -> 3C013F40 / 34210000
+;  1.00 -> 3C013F80 / 34210000

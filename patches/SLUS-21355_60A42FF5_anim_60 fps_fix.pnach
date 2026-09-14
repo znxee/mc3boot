@@ -1,0 +1,52 @@
+gametitle=Midnight Club 3: DUB Edition Remix (SLUS-21355)
+comment=60 FPS e as correcoes de velocidade de animacao, em grupos separados
+
+// ---------------------------------------------------------------------------
+//  Quatro grupos independentes, porque eles NAO andam sempre juntos.
+//
+//  [1]  60 FPS             o patch em si
+//  [2a] Flash @ 60         tela de loading, quando o NTSC do PCSX2 esta em 60
+//  [2b] Flash @ 120        tela de loading, quando o NTSC do PCSX2 esta em 120
+//  [3]  Pedestres (fixo)   corrige os pedestres, mas SO a 60 fps exatos
+//
+//  Antes tudo isso era um grupo so. Quem desligasse o grupo para deixar o
+//  payload do modloader cuidar dos pedestres desligava o flash junto -- e a
+//  tela de loading voltava a correr acelerada. Foi o que aconteceu.
+//
+//  Combinacoes:
+//     60 fps, sem modloader ......... [1] + [2a] + [3]
+//     60 fps com o payload .......... [1] + [2a]
+//     120 fps (NTSC do PCSX2) ....... [1] + [2b]   ([3] estaria errado)
+//     30 fps original ............... nenhum
+// ---------------------------------------------------------------------------
+
+[60 FPS\1 - Destravar para 60 fps]
+author=[ZNX]
+description=O tratador de vblank conta os campos que gfxPipeline::BeginFrame pediu e so solta o semaforo da thread do jogo no zero. Anular esse desvio faz soltar em TODO campo: 29.97 -> 59.94 Hz. Uma palavra.
+patch=1,EE,005280F0,word,00000000
+
+[60 FPS\2a - Flash da tela de loading @ 60 fps]
+author=[ZNX]
+description=Os dois chamadores de flash da thread de loading passam um delta CRAVADO (0.03333 e 0.033), dimensionado para 30 fps. Com o vblank destravado o laco de loading gira o dobro e a animacao anda em dobro. Aqui a constante e dividida por 2 -- exato, o valor e montado por lui+ori e so o expoente do lui muda. Use com o NTSC do PCSX2 em 60.
+patch=1,EE,001AC2A4,word,3C013C88   // 0.033333 -> 0.016667   (1/30 -> 1/60)
+patch=1,EE,0028EE68,word,3C013C87   // 0.0330   -> 0.0165
+
+[60 FPS\2b - Flash da tela de loading @ 120 fps]
+author=[ZNX]
+description=A mesma constante dividida por 4, para o NTSC do PCSX2 em 120 Hz. Medido no savestate da tela de loading: o laco gira a 120.5 Hz enquanto o dt publicado (0x618E54) esta cravado em 1/60. Por isso NAO adianta mandar o flash ler o dt -- era o que o patch antigo de inverter o sinal fazia, e ele equivale exatamente ao /2, travado ali. A constante tem que casar com a taxa de campo real.
+patch=1,EE,001AC2A4,word,3C013C08   // 0.033333 -> 0.008333   (1/30 -> 1/120)
+patch=1,EE,0028EE68,word,3C013C07   // 0.0330   -> 0.00825
+
+[60 FPS\3 - Pedestres (constante, SO para 60 fps)]
+author=[ZNX]
+description=A taxa de reproducao da animacao dos pedestres esta em QUADROS POR TIQUE, sem dt. Estas dez linhas cortam a taxa pela metade nas fontes: mcCreature::Init (base 1.10, amplitude 0.35 e o literal 1.0), os literais passados ao SetPlayBackRate e os defaults internos dele. So esta certo a 60 fps EXATOS -- a 30 os pedestres andam em camera lenta, a 120 ficam 2x rapidos. Para qualquer taxa use o payload do modloader, que calcula taxa = base * dt * 30, e deixe este grupo desmarcado.
+patch=1,EE,0045F638,word,3C013E33   // 0.35 -> 0.175   amplitude aleatoria
+patch=1,EE,0045F644,word,3C013F0C   // 1.10 -> 0.55    taxa base
+patch=1,EE,0045F698,word,3C013F00   // 1.0  -> 0.5     taxa sem variacao
+patch=1,EE,0045F6A8,word,3C013F00   // 1.0  -> 0.5     2o argumento do SetPlayBackRate
+patch=1,EE,0045FD98,word,3C013F00   // 1.0  -> 0.5     chamadas em mcCreature::ApplyAnimRate
+patch=1,EE,0045FDB0,word,3C013F00
+patch=1,EE,0045FDC8,word,3C013F00
+patch=1,EE,00463430,word,3C013F00   // 1.0  -> 0.5     defaults internos do SetPlayBackRate
+patch=1,EE,0046345C,word,3C013F00
+patch=1,EE,004633A0,word,3C013F00   // 1.0  -> 0.5     construtor do mcCreatureAnimator
