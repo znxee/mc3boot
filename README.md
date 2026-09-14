@@ -209,6 +209,7 @@ HI16`).
 | `menu_row` | Adding a row to the top-level menu. |
 | `draw_distance` | A real option: a menu row, a saved setting, and an assembly trampoline that rewrites its own `lui` immediate. |
 | `patches_menu` | Taking over a whole menu screen the game builds and never uses. |
+| `registry_provider` + `registry_demo` | One mod calling a function that lives in another. |
 | `core` | The module that loads the other modules. Read it last. |
 
 ---

@@ -220,6 +220,55 @@ integer bit patterns.
 
 ---
 
+## Calling a function in another mod
+
+There is no symbol table and no dynamic linker: every `.mod` is relocated to
+wherever it lands, so you cannot name another module's function at build time.
+What both sides *can* agree on is a number.
+
+```c
+#include "../../payload/mc3_registry.h"
+
+/* in the provider */
+extern "C" mc3_u32 my_answer(void) { return 42; }
+mc3_export(MC3_ID('D','E','M','O'), (void *)&my_answer);
+
+/* in the consumer */
+typedef mc3_u32 (*answer_fn)(void);
+answer_fn f = (answer_fn)mc3_import(MC3_ID('D','E','M','O'));
+if (f) use(f());
+```
+
+`mods/registry_provider` and `mods/registry_demo` are that pair, kept as a
+working example.
+
+**The id is four characters, not a string, and that is not cosmetic.** A string
+literal is a data base — see the trap above. Character literals are plain
+integer constants, so `MC3_ID` folds at compile time and adds nothing to the
+module.
+
+The table is allocated by `mc3boot` before any module runs, so neither side owns
+it and there is no ordering question about the table itself.
+
+### Load order is the real constraint
+
+Only about who has filled it in yet. A module can import only what has already
+been exported, and what has run by a given moment depends on the `.ini`: `= 1`
+from boot, `shim` from `Main`'s init, `defer` from the first frame. **A hooked
+module exports nothing until one of its hooks fires**, because that is the only
+time its code runs.
+
+So **import at the point of use, not at load**, and cache the result only once
+it comes back non-null. A null is a normal answer.
+
+That trap is not hypothetical — it cost a test run here. The first provider was
+`draw_distance`, whose hooks are the race camera and the Camera Options screen;
+a headless boot touches neither, so it published nothing and the consumer
+correctly found nothing. The example pair is hookless for that reason.
+
+Nothing here is type checked. An id whose signature the two sides disagree about
+is a crash.
+
 ## Text on screen
 
 The game's font is sixteen bits per character. An 8-bit string draws as garbage.

@@ -299,6 +299,8 @@ struct mc3_shim {
     u32 hits;        /* filled in later by the payload, see mc3_modfmt.h */
     u32 orig_base;   /* {addr, original} pairs, see snap_originals */
     u32 orig_n;
+    u32 reg_base;    /* {id, fn} pairs, see reserve_registry */
+    u32 reg_cap;
 };
 static struct mc3_shim *const g_shim = (struct mc3_shim *)MC3_SHIMHDR;
 static u32 shim_next = MC3_MODEND;      /* bump allocator, downward */
@@ -370,6 +372,42 @@ static u32 shim_install(u32 alvo)
  *  a mod looks its address up instead of trusting two walks to agree. 8 bytes
  *  times however many writes the table has - 48 today, 384 bytes.
  * ------------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------------
+ *  The export registry
+ *
+ *  A table of {id, function} so one module can call another's code. Allocated
+ *  HERE, at boot, for one reason: it then exists before any module runs, so no
+ *  module has to own it and there is no ordering question about the table
+ *  itself. Only about who has filled it in yet, which is the caller's problem
+ *  and is documented in ../payload/mc3_registry.h.
+ *
+ *  Zeroed, because an id of 0 is what marks a slot free.
+ * ------------------------------------------------------------------------- */
+#define REG_CAP 32u
+
+static void reserve_registry(void)
+{
+    const u32 bytes = REG_CAP * 8u;
+    u32 i;
+
+    if (shim_next - bytes < mod_next + 16u)
+        return;                 /* no room: modules find no table and cope */
+    shim_next -= bytes;
+
+    for (i = 0; i < bytes / 4u; ++i)
+        ((volatile u32 *)shim_next)[i] = 0;
+
+    if (g_shim->magic != MC3_SHIM_MAGIC) {
+        g_shim->magic = MC3_SHIM_MAGIC;
+        g_shim->count = 0;
+        g_shim->stride = SHIM_STRIDE;
+        g_shim->hits = 0;
+        g_shim->base = 0;
+    }
+    g_shim->reg_base = shim_next;
+    g_shim->reg_cap = REG_CAP;
+}
+
 static u32 snap_originals(const mc3_group *tab, int count)
 {
     int g;
@@ -970,6 +1008,11 @@ int main(int argc, char *argv[])
      * module - the address a hook jumped into held "Rims" and .pck padding, and
      * the game hung before its first frame. 10 KB that nothing touches beats
      * 256 KB that the game reuses. */
+    /* Before read_ini, because read_ini is what loads the modules and a `= 1`
+     * module's hooks are live from boot - so the export table has to exist
+     * before the first one of them can run. */
+    reserve_registry();
+
     flags = read_ini(flags);
     *(volatile u32 *)MC3_CFG       = MC3_CFG_MAGIC;
     *(volatile u32 *)(MC3_CFG + 4) = flags;
@@ -1052,6 +1095,8 @@ int main(int argc, char *argv[])
                                           ? g_shim->count : 0u, 3);
     sio_puts(" orig=");           sio_hex(g_shim->magic == MC3_SHIM_MAGIC
                                           ? g_shim->orig_n : 0u, 3);
+    sio_puts(" reg=");            sio_hex(g_shim->magic == MC3_SHIM_MAGIC
+                                          ? g_shim->reg_cap : 0u, 3);
     sio_puts(" hooks=");          sio_hex((u32)hook_count, 3);
     sio_puts(" mods=");           sio_hex((u32)mod_loaded, 3);
     sio_puts("\n");

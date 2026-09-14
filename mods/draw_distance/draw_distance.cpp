@@ -84,6 +84,7 @@
 // -----------------------------------------------------------------------------
 
 #include "../../payload/mc3_mod.h"
+#include "../../payload/mc3_registry.h"
 
 enum {
     // WHICH SCREEN THE ROW GOES ON.
@@ -390,6 +391,24 @@ static void apply(mc3_u32 level)
     s->applied = d;
 }
 
+// Published so another module can ask what the player chose without knowing
+// anything about this one - no header shared, no address agreed by hand, just
+// the id. See payload/mc3_registry.h.
+extern "C" mc3_u32 dd_current_distance(void)
+{
+    return level_distance(read_level());
+}
+
+// Publishing is deliberately OUTSIDE the one-shot guard below, and that is a
+// bug fixed rather than a style choice: the export first went inside it, and
+// row_tail sets the same guard, so visiting any menu before a race meant the
+// export never ran and every importer saw nothing. Re-exporting is harmless -
+// the registry replaces an entry with the same id.
+static void publish(void)
+{
+    mc3_export(MC3_ID('D', 'D', 'S', 'T'), (void *)&dd_current_distance);
+}
+
 // "Draw Dist: <n>" in UCS-2, character by character. The game's font takes
 // sixteen bits per character - an 8-bit literal draws as garbage - and building
 // it numerically keeps the module at one data base.
@@ -471,6 +490,7 @@ extern "C" void row_tail(mc3_u32 list, mc3_u32 item, int which,
         s->level = read_level();
         apply(s->level);
     }
+    publish();
     add_row(shell);
 }
 
@@ -498,6 +518,7 @@ extern "C" void install_once(void)
         s->level = read_level();
         apply(s->level);
     }
+    publish();
 }
 
 MC3_HOOK(ROW_SITE, row_tail);
