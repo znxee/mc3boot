@@ -327,6 +327,72 @@ Worth remembering if you copy `sensato()`-style guards into a new mod, as
 several already have: decide separately, for each pointer you are about to
 validate, whether it actually has to be aligned.
 
+## Reviving a game function instead of writing your own
+
+Not everything worth calling was written by this project. Retail's
+`datArgParser` — `Init(argc, argv)`, `Get(key)`, `SaveToArchive`,
+`RestoreFromArchive`, `Kill` — is a complete, working command-line-argument
+parser class that the executable still calls once, from `main()`, before the
+game itself starts. Disassembling `Init` shows exactly what it does: walk
+`argv`, and for every entry starting with `-` insert the text after it into
+a hash table, splitting off `=value` at the first `=`. Nothing about that
+needs boot-time-only memory — it allocates with the game's own `operator
+new`, the same one every `shim` mod already calls through `mc3_alloc`.
+
+What it does not have any more is anything to parse: the function that would
+build a real `argv` from a file on disk is an empty `jr ra; nop` stub in this
+build, so `Init` runs once at boot with nothing in it, and nothing in the
+executable's own data ever calls `Get()` with a real flag name. The function
+is not broken — it was just never fed a second time, by anything.
+
+`mods/native_bootargs` feeds it: `[boot]` lines from the `.ini`, reshaped
+into a synthetic `argv` and handed to `Init` a second time, once, on the
+first frame. From then on, `Get("key")` — the game's own function, not a
+lookup this project wrote — answers for real:
+
+```c
+#include "../../payload/mc3_native_args.h"
+
+mc3_u32 argv;
+const mc3_u32 argc = mc3_native_argv(&argv);
+if (argc)
+    MC3_CALL2(void, 0x00428AC0, int, char **)((int)argc, (char **)argv);
+```
+
+The lesson generalises past this one function: before writing a mod's own
+version of something, check whether the executable already has a working one
+sitting unused. A symbol table search costs a few minutes; reimplementing
+parsing, hashing or file I/O the game already ships costs a lot more, and
+its data structures are inevitably compatible with the rest of the game in a
+way a mod's own version is not.
+
+### The bug a fixed-size shared header will always eventually hit
+
+`native_bootargs` needed one more word in the shim header (`0x0061D050`) to
+publish where its `argv` lives — the same header `mc3_registry.h` and
+`mc3_bootargs.h` already share fields in. The first attempt added *two*:
+`argv_base` and an `argv_n` count, mirroring `args_base`/`args_n` right next
+to it. It built without warning and linked without warning, and it was wrong:
+`argv_n` read back as whatever garbage happened to sit past the header, not
+the value just written.
+
+The reason is a boundary this project had already documented but this change
+did not check against: `mc3_inject.py`'s own cave layout comment says the gap
+between the shim header and the next fixed structure (`MODTAB`, the module
+entry table) is exactly 48 bytes. The header already used 44 of them across
+its existing 11 fields, leaving room for exactly **one** more word — not two.
+The second field spilled 4 bytes into `MODTAB`'s first entry, and every write
+to that struct member was actually landing on the module table instead.
+
+The fix was not a bigger header — that boundary is fixed by other things that
+already assume it — but doing without the second field: `argv[]` is
+zero-terminated instead, the same "a free slot ends the search" convention
+`bootarg_slot` already uses a few lines above it, so `argc` is never stored
+anywhere at all. A reader counts up to the terminator itself.
+
+Worth checking before adding a field to a struct at a fixed cave address: is
+there documented room for it, or only room for what is already there.
+
 ## Text on screen
 
 The game's font is sixteen bits per character. An 8-bit string draws as garbage.

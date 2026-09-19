@@ -303,6 +303,16 @@ struct mc3_shim {
     u32 reg_cap;
     u32 args_base;   /* {id, value[ARGS_VALLEN]} pairs, see the [boot] section */
     u32 args_n;
+    /* NOT argv_n too: SHIMHDR..MODTAB is a fixed 48-byte gap (mc3_inject.py's
+     * own layout comment), and this struct at 11 u32 fields already used all
+     * but the last word of it - a 12th field is the most that fits before
+     * spilling into MODTAB's first entry. Measured the hard way: a first
+     * attempt at this feature added argv_base AND argv_n here, and the SIO
+     * log showed argv_n reading back as whatever MODTAB[0] happened to hold,
+     * not what nativearg_add had just written. So argc rides in the array
+     * instead - see reserve_nativeargs: a zero argv[] entry ends it, the same
+     * "id 0 means free" convention bootarg_slot already uses. */
+    u32 argv_base;   /* char* argv[NATIVE_ARGS_CAP], zero-terminated */
 };
 static struct mc3_shim *const g_shim = (struct mc3_shim *)MC3_SHIMHDR;
 static u32 shim_next = MC3_MODEND;      /* bump allocator, downward */
@@ -521,6 +531,96 @@ static void bootarg_set(const char *key, const char *value)
      * whole value, never a live id paired with a half-written string. */
     *(volatile u32 *)rec = id;
     g_shim->args_n += 1u;
+}
+
+/* ---------------------------------------------------------------------------
+ *  Native argv: the same [boot] lines, reshaped into what
+ *  datArgParser::Init(int argc, char **argv) actually expects.
+ *
+ *  bootarg_set above stores each [boot] key as a 4-character id, which is
+ *  enough for a .mod to ask "was X set" but throws away everything past the
+ *  fourth letter - "maxopponents" and "maxo" fold to the same slot. That is
+ *  fine for mc3_bootarg's own lookup (a .mod asks with the same folded id it
+ *  wrote), but datArgParser::Get hashes the FULL string the game already
+ *  ships with ("maxopponents", not "maxo"), so feeding it a truncated key
+ *  would silently never match.
+ *
+ *  So this keeps the untruncated text instead, formatted the one way
+ *  datArgParser::Init actually parses (measured by disassembling it): each
+ *  argv[] entry is "-key" or "-key=value", one leading '-', at most one '='.
+ *  Init walks argv itself splitting on '=' and inserting into its own
+ *  ArgHash - nothing here duplicates that logic, it only builds the array
+ *  Init already knows how to read.
+ * ------------------------------------------------------------------------- */
+#define NATIVE_ARGS_CAP    16u
+#define NATIVE_ARG_LEN     48u   /* "-maxopponents=whatever", NUL included */
+
+/* How many argv[] slots are filled so far. Kept here rather than as another
+ * shim-header field - see the field's own comment on why only one more word
+ * fit. Nothing outside this file needs the count during boot: a .mod finds
+ * it by scanning argv[] for the zero entry, same contract as real argv/argc
+ * conventions where a NULL terminator makes the array self-describing. */
+static u32 nativeargs_n = 0;
+
+static void reserve_nativeargs(void)
+{
+    const u32 pool_bytes = NATIVE_ARGS_CAP * NATIVE_ARG_LEN;
+    const u32 argv_bytes = (NATIVE_ARGS_CAP + 1u) * 4u;  /* +1: the NULL terminator slot */
+    u32 i;
+
+    if (shim_next - (pool_bytes + argv_bytes) < mod_next + 16u)
+        return;
+    shim_next -= argv_bytes;
+    for (i = 0; i < argv_bytes / 4u; ++i) ((volatile u32 *)shim_next)[i] = 0;
+    g_shim->argv_base = shim_next;
+
+    shim_next -= pool_bytes;
+    for (i = 0; i < pool_bytes; ++i) ((volatile u8 *)shim_next)[i] = 0;
+    /* g_native_pool: not kept as its own variable - argv_base - pool_bytes
+     * is always where it lands, and nativearg_add below recomputes it the
+     * same way rather than adding a field nothing else needs. */
+
+    if (g_shim->magic != MC3_SHIM_MAGIC) {
+        g_shim->magic = MC3_SHIM_MAGIC;
+        g_shim->count = 0;
+        g_shim->stride = SHIM_STRIDE;
+        g_shim->hits = 0;
+        g_shim->base = 0;
+    }
+    nativeargs_n = 0;
+}
+
+static void nativearg_add(const char *key, const char *value)
+{
+    u32 pool, slot, n, i, j;
+
+    if (!g_shim->argv_base || nativeargs_n >= NATIVE_ARGS_CAP)
+        return;                          /* table did not fit, or is full */
+
+    n = nativeargs_n;
+    pool = g_shim->argv_base - NATIVE_ARGS_CAP * NATIVE_ARG_LEN;
+    slot = pool + n * NATIVE_ARG_LEN;
+
+    j = 0;
+    ((volatile char *)slot)[j++] = '-';
+    for (i = 0; key[i] && j < NATIVE_ARG_LEN - 2u; ++i)
+        ((volatile char *)slot)[j++] = key[i];
+    /* An empty or "1" value means a bare flag ("-nofe"), same convention the
+     * alpha's own vocabulary used for on/off switches - anything else is
+     * carried as "-key=value" for datArgParser::Get's indexed/typed forms. */
+    if (value[0] && !(value[0] == '1' && value[1] == 0)) {
+        ((volatile char *)slot)[j++] = '=';
+        for (i = 0; value[i] && j < NATIVE_ARG_LEN - 1u; ++i)
+            ((volatile char *)slot)[j++] = value[i];
+    }
+    ((volatile char *)slot)[j] = 0;
+
+    ((volatile u32 *)g_shim->argv_base)[n] = slot;
+    /* [n + 1] stays 0 - reserve_nativeargs zeroed the whole array and this
+     * only ever fills it front to back, so the slot right after n is always
+     * either untouched (still the NULL terminator) or the next entry a later
+     * call will overwrite in turn. */
+    nativeargs_n = n + 1u;
 }
 
 static u32 snap_originals(const mc3_group *tab, int count)
@@ -1026,6 +1126,7 @@ static u32 read_ini(u32 flags)
              * does not validate, the same way [mods] does not know what a
              * module's own hooks do. */
             bootarg_set(key, value);
+            nativearg_add(key, value);
             ++applied;
         }
     }
@@ -1150,6 +1251,7 @@ int main(int argc, char *argv[])
      * before the first one of them can run. */
     reserve_registry();
     reserve_bootargs();
+    reserve_nativeargs();
 
     flags = read_ini(flags);
     *(volatile u32 *)MC3_CFG       = MC3_CFG_MAGIC;
@@ -1237,6 +1339,7 @@ int main(int argc, char *argv[])
                                           ? g_shim->reg_cap : 0u, 3);
     sio_puts(" args=");           sio_hex(g_shim->magic == MC3_SHIM_MAGIC
                                           ? g_shim->args_n : 0u, 3);
+    sio_puts(" argv=");           sio_hex(nativeargs_n, 3);
     sio_puts(" hooks=");          sio_hex((u32)hook_count, 3);
     sio_puts(" mods=");           sio_hex((u32)mod_loaded, 3);
     sio_puts("\n");

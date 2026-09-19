@@ -187,6 +187,39 @@ example: it reads `[boot] city`, resolves the name against the game's own live
 city table, and falls back to a compiled-in default when the key is absent or
 does not resolve to anything registered.
 
+### `[boot]` also reaches the game's own argument parser, unmodified
+
+The retail executable still has a complete, functional `datArgParser`:
+`Init(argc, argv)`, `Get(key)`, `SaveToArchive`, `RestoreFromArchive`, `Kill`,
+all named at fixed addresses and all called from `main()` before the game
+proper starts. What it does not have any more is anything feeding it — the
+function that would build `argv` from a response file on disk disassembles to
+an empty stub in this build, and nothing in the executable's own data calls
+`Get()` with any flag name. The parser survived; its data source did not.
+
+`mods/native_bootargs` reconnects the two without touching either: it takes
+the exact same `[boot]` lines (untruncated, unlike the four-character keys
+above — `datArgParser` hashes the full string) and calls `Init` a second time
+with a synthetic `argv` built from them, once, on the first frame. From then
+on any mod can call the game's own `Get("key")` and get a real answer, driven
+by the `.ini` instead of a rebuild.
+
+```ini
+[boot]
+city = detroit
+```
+
+```c
+#include "../../payload/mc3_native_args.h"
+
+mc3_u32 argv;
+const mc3_u32 argc = mc3_native_argv(&argv);   // 0 if [boot] set nothing
+// feed argc/argv to datArgParser::Init once; see mods/native_bootargs
+```
+
+This only revives the parser — it does not reimplement what any flag *does*.
+That still means writing an ordinary hook, the same as everything else here.
+
 ---
 
 ## The space budget
@@ -239,6 +272,7 @@ HI16`).
 | `patches_menu` | Taking over a whole menu screen the game builds and never uses. |
 | `registry_provider` + `registry_demo` | One mod calling a function that lives in another. |
 | `city_force` | Reading `[boot]` from the `.ini` instead of a compiled-in constant. |
+| `native_bootargs` | Feeding `[boot]` into the game's own, still-functional `datArgParser`. |
 | `core` | The module that loads the other modules. Read it last. |
 
 ---
