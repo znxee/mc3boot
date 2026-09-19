@@ -52,6 +52,16 @@
 //  mcNetManager::WaitForSync theory. Its fast-exit field, *(dword_619D5C+16),
 //  measured -1 before anything wrote it.
 //
+//  [boot] garage = 1
+//
+//  The same patch with code 0x12 (DoLoadGarage = ChangeState(5)) instead of 6:
+//  what the alpha's -garage did. Retail's Main already makes the call the
+//  alpha made before it, mcLocalPlayerOptions::SetToDefaults(true), at
+//  0x001A0F6C. Seen on screen: the garage, in "Buy Vehicles". The likely
+//  reason, not yet measured: the memory card save is loaded by the front end's
+//  flow, so without it the player owns no car and the garage opens on buying
+//  the first. garage wins if both keys are set.
+//
 //  CITY, TIME, WEATHER, RACE TYPE
 //
 //  race_bootargs and city_force write these every frame, but per-frame modules
@@ -73,6 +83,7 @@ enum {
     REQUEST_CODE   = 0x001A1018,   // li a1, <code>, right after the RequestAction call
     CODE_ORIGINAL  = 0x24050010,   // addiu a1, zero, 0x10  (DoStartMovie)
     CODE_LOADRACE  = 0x24050006,   // addiu a1, zero, 6     (DoLoadRace -> ChangeState(2))
+    CODE_GARAGE    = 0x24050012,   // addiu a1, zero, 0x12  (DoLoadGarage -> ChangeState(5))
     FLUSH_CACHE    = 0x00546C20,
 
     CFG_CURRENT    = 0x00619B10,   // mcRaceConfig* current
@@ -160,7 +171,9 @@ extern "C" void race_nofe_hook(mc3_u32 movie_config, const char *movie_name)
         return;
 
     const char *const nofe = mc3_bootarg(MC3_ID('n', 'o', 'f', 'e'));
-    if (!nofe || nofe[0] == '0')
+    const char *const garage = mc3_bootarg(MC3_ID('g', 'a', 'r', 'a'));
+    const int want_garage = garage && garage[0] != '0';
+    if (!want_garage && (!nofe || nofe[0] == '0'))
         return;
 
     volatile mc3_u32 *const word = (volatile mc3_u32 *)REQUEST_CODE;
@@ -179,12 +192,12 @@ extern "C" void race_nofe_hook(mc3_u32 movie_config, const char *movie_name)
     tag('R', 'N', 'C', 'R'); text(car); put(10);                    // RNCR <car in use>
     apply_race_keys();
 
-    *word = (mc3_u32)CODE_LOADRACE;
+    *word = (mc3_u32)(want_garage ? CODE_GARAGE : CODE_LOADRACE);
     MC3_CALL1(void, FLUSH_CACHE, int)(0);
     MC3_CALL1(void, FLUSH_CACHE, int)(2);
 
     s->patched = 1u;
-    tag('R', 'N', 'O', 'K'); put(10);
+    tag('R', 'N', 'O', 'K'); hex8(*word); put(10);   // RNOK <the request now queued>
 }
 
 MC3_HOOK(SITE, race_nofe_hook);

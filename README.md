@@ -269,6 +269,11 @@ weather = rainy
 Verified on screen: Detroit, snowing (how the game renders `rainy` there),
 dusk, the '69 Charger, about ten seconds after boot.
 
+`garage = 1` instead of `nofe` asks for the garage (code `0x12`, what the
+alpha's `-garage` did) and opens it in "Buy Vehicles" - most likely because
+the memory card save is only loaded through the front end, so the player
+owns no car yet.
+
 One flag from the same wishlist did not have anywhere to land in the race
 format itself: a race's text file still accepts a `ForcedCar` key, but
 disassembly shows it reads the value and never uses it — vestigial, like
