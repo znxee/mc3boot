@@ -237,13 +237,22 @@ weather = rainy
 racetype = trial
 ```
 
-Two flags from the same wishlist did not have anywhere to land, and why is
-worth keeping rather than guessing again later: a race's text format still
-accepts a `ForcedCar` key, but disassembly shows it reads the value and never
-uses it — vestigial, like `ResponseFile` above. And there is no opponent
-*count* field to set at all; opponents come from a list `mcRaceBase` parses
-out of the race file, which would need intercepting that parse, not writing
-an int.
+One flag from the same wishlist did not have anywhere to land at all, and
+why is worth keeping rather than guessing again later: a race's text format
+still accepts a `ForcedCar` key, but disassembly shows it reads the value
+and never uses it — vestigial, like `ResponseFile` above.
+
+`maxopponents` turned out to have somewhere to land after all, once checked
+against the alpha build instead of assumed absent: `mods/race_maxopponents`
+hooks the one call site of `mcRaceBase::LoadOpponents` and clamps the
+opponent count it just loaded — the same clamp the alpha's own
+`PARAM_maxopponents` applied inside that identically-named function, just
+reproduced from outside it afterward instead of patched into its middle:
+
+```ini
+[boot]
+maxopponents = 3
+```
 
 ---
 
@@ -299,6 +308,7 @@ HI16`).
 | `city_force` | Reading `[boot]` from the `.ini` instead of a compiled-in constant. |
 | `native_bootargs` | Feeding `[boot]` into the game's own, still-functional `datArgParser`. |
 | `race_bootargs` | `[boot] time`/`weather`/`racetype`, applied through the game's own setters. |
+| `race_maxopponents` | `[boot] maxopponents`, clamped after the game's own opponent loader runs. |
 | `core` | The module that loads the other modules. Read it last. |
 
 ---
