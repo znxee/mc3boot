@@ -220,6 +220,31 @@ const mc3_u32 argc = mc3_native_argv(&argv);   // 0 if [boot] set nothing
 This only revives the parser — it does not reimplement what any flag *does*.
 That still means writing an ordinary hook, the same as everything else here.
 
+### `[boot]` flags that already had somewhere to land
+
+Three did: `mods/race_bootargs` reads `time`, `weather` and `racetype` and
+calls the game's own setters —
+`mcRaceConfig::SetTOD`/`SetWeather`/`SetRaceType` — the exact three functions
+a race's own text file already drives. Each validates its string against a
+fixed table (`dawn`/`midnight`/`dusk`, `clear`/`cloudy`/`rainy`, and 23 race
+types from `roam` to `ordered_track`) and ignores anything else, so there was
+no guard to write by hand:
+
+```ini
+[boot]
+time = dusk
+weather = rainy
+racetype = trial
+```
+
+Two flags from the same wishlist did not have anywhere to land, and why is
+worth keeping rather than guessing again later: a race's text format still
+accepts a `ForcedCar` key, but disassembly shows it reads the value and never
+uses it — vestigial, like `ResponseFile` above. And there is no opponent
+*count* field to set at all; opponents come from a list `mcRaceBase` parses
+out of the race file, which would need intercepting that parse, not writing
+an int.
+
 ---
 
 ## The space budget
@@ -273,6 +298,7 @@ HI16`).
 | `registry_provider` + `registry_demo` | One mod calling a function that lives in another. |
 | `city_force` | Reading `[boot]` from the `.ini` instead of a compiled-in constant. |
 | `native_bootargs` | Feeding `[boot]` into the game's own, still-functional `datArgParser`. |
+| `race_bootargs` | `[boot] time`/`weather`/`racetype`, applied through the game's own setters. |
 | `core` | The module that loads the other modules. Read it last. |
 
 ---
