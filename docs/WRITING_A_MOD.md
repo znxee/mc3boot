@@ -269,6 +269,64 @@ correctly found nothing. The example pair is hookless for that reason.
 Nothing here is type checked. An id whose signature the two sides disagree about
 is a crash.
 
+## Reading `[boot]` from the `.ini`
+
+The same `.mod` file, told at boot time what to do instead of hard-coding it:
+
+```ini
+[boot]
+city = detroit
+```
+
+```c
+#include "../../payload/mc3_bootargs.h"
+
+const char *city = mc3_bootarg(MC3_ID('c','i','t','y'));
+if (city) { /* resolve it against whatever the mod cares about */ }
+```
+
+`mc3_bootarg` returns `NULL` when the key was never set — the ordinary case
+when nobody wrote a `[boot]` section — so always keep a compiled-in default to
+fall back to, the way `mods/city_force` falls back to a fixed city index when
+`[boot] city` is absent or names something that does not resolve.
+
+The key is `MC3_ID`, the exact macro from the registry section above, reused
+rather than duplicated: an `.ini` key is folded into the same four bytes by
+keeping only its first four characters, entirely on `mc3boot.c`'s side, which
+has a real libc and can afford `strncmp` freely. The `.mod` reading it back
+never touches a string literal of its own, so it never becomes a second data
+base — only *authoring* one does.
+
+### The bug this shape avoids finding twice
+
+`city_force` resolves `[boot] city`'s text against the live city table by
+walking it and calling the game's own `strcasecmp` on each record's name
+pointer — and the first version of that walk used the same address-sanity
+guard several mods in this project use everywhere else:
+
+```c
+static int sensato(mc3_u32 p) { return p >= 0x00100000u && p < 0x02000000u && (p & 3u) == 0u; }
+```
+
+That guard is right for a table base or an object pointer — both are real
+allocations, genuinely 4-aligned. It is wrong for a **name** pointer: city
+names live packed back-to-back in one string table (`"sd\0atlanta\0detroit\0..."`),
+so every name after the first lands on whatever byte follows the previous
+name's NUL — measured, `"atlanta"` sat at an address ending in `...4D`, not
+4-aligned at all. The alignment check silently rejected it and ended the whole
+search on the second entry, before it ever reached `"detroit"`.
+
+The fix is a second guard with the range check only, used specifically for
+string pointers:
+
+```c
+static int name_ok(mc3_u32 p) { return p >= 0x00100000u && p < 0x02000000u; }
+```
+
+Worth remembering if you copy `sensato()`-style guards into a new mod, as
+several already have: decide separately, for each pointer you are about to
+validate, whether it actually has to be aligned.
+
 ## Text on screen
 
 The game's font is sixteen bits per character. An 8-bit string draws as garbage.

@@ -301,6 +301,8 @@ struct mc3_shim {
     u32 orig_n;
     u32 reg_base;    /* {id, fn} pairs, see reserve_registry */
     u32 reg_cap;
+    u32 args_base;   /* {id, value[ARGS_VALLEN]} pairs, see the [boot] section */
+    u32 args_n;
 };
 static struct mc3_shim *const g_shim = (struct mc3_shim *)MC3_SHIMHDR;
 static u32 shim_next = MC3_MODEND;      /* bump allocator, downward */
@@ -406,6 +408,119 @@ static void reserve_registry(void)
     }
     g_shim->reg_base = shim_next;
     g_shim->reg_cap = REG_CAP;
+}
+
+/* ---------------------------------------------------------------------------
+ *  Boot args: [boot] key = value in the .ini, read back by any module.
+ *
+ *  WHY THIS EXISTS
+ *
+ *  Testing a specific scene - "boot straight into modcity", "boot with car X
+ *  selected" - used to mean a constant baked into a .cpp, a rebuild, and a
+ *  copy to HostFS for every single change. The .ini is already read before any
+ *  module runs; this just gives a module a way to ask it a question, the same
+ *  way mc3_registry.h lets one module call another's function without either
+ *  side owning a fixed address.
+ *
+ *  THE KEY IS FOUR CHARACTERS, on purpose and for the same reason as the
+ *  registry: a string literal in a .mod is a data base, and mc3_mkmod refuses
+ *  a build where GCC shares one `lui` across several. So a module never
+ *  compares strings - it asks for MC3_ID('c','i','t','y'), the exact macro
+ *  payload/mc3_registry.h already defines, reused here rather than duplicated.
+ *  An .ini key is folded into the same four bytes by keeping only its first
+ *  four characters, so writing `city = modcity` in the .ini and asking for
+ *  MC3_ID('c','i','t','y') refer to the same slot without either side needing
+ *  to know that about the other beyond the four letters lining up.
+ *
+ *  THE VALUE is plain text, up to ARGS_VALLEN-1 bytes, because that half of
+ *  the trap does not apply here: this file is compiled with a real libc
+ *  (mc3boot.elf is the standalone loader, not a freestanding .mod), so
+ *  building the table costs nothing unusual. Reading it back from a .mod is
+ *  a byte compare against what THIS file already wrote, not a literal the mod
+ *  authored itself, so it never becomes a second data base either.
+ * ------------------------------------------------------------------------- */
+#define ARGS_CAP     16u
+#define ARGS_VALLEN  32u
+#define ARGS_STRIDE  (4u + ARGS_VALLEN)
+
+static void reserve_bootargs(void)
+{
+    const u32 bytes = ARGS_CAP * ARGS_STRIDE;
+    u32 i;
+
+    if (shim_next - bytes < mod_next + 16u)
+        return;
+    shim_next -= bytes;
+
+    for (i = 0; i < bytes; ++i)
+        ((volatile u8 *)shim_next)[i] = 0;
+
+    if (g_shim->magic != MC3_SHIM_MAGIC) {
+        g_shim->magic = MC3_SHIM_MAGIC;
+        g_shim->count = 0;
+        g_shim->stride = SHIM_STRIDE;
+        g_shim->hits = 0;
+        g_shim->base = 0;
+    }
+    g_shim->args_base = shim_next;
+    g_shim->args_n = 0;             /* how many are actually SET, not the cap */
+}
+
+/* Packs up to the first four characters of an .ini key into the same 32-bit
+ * shape MC3_ID(a,b,c,d) builds in payload/mc3_registry.h - see that macro for
+ * why it is this order. A key shorter than four characters pads with 0, same
+ * as a mod that passes '\0' for characters it does not need. */
+static u32 bootarg_id(const char *key)
+{
+    u32 id = 0;
+    int i, ended = 0;
+    /* Once the key ends, every remaining slot packs as 0 - the same value a
+     * mod gets from passing '\0' to MC3_ID for the characters it does not
+     * need, so "car" and MC3_ID('c','a','r','\0') land on the same id.
+     * `ended` matters: after the terminator, key[i] is memory this string
+     * does not own, so it is never read once seen. */
+    for (i = 0; i < 4; ++i) {
+        u8 c = 0;
+        if (!ended) {
+            if (key[i]) c = (u8)key[i];
+            else ended = 1;
+        }
+        id = (id << 8) | (u32)c;
+    }
+    return id;
+}
+
+/* Finds the id's slot, or the first free one when `make` is set. Same shape as
+ * mc3_reg_slot in mc3_registry.h: re-setting an existing key replaces it. */
+static volatile u8 *bootarg_slot(u32 id, int make)
+{
+    u32 i;
+    volatile u8 *empty = 0;
+    if (g_shim->magic != MC3_SHIM_MAGIC || !g_shim->args_base)
+        return 0;
+    for (i = 0; i < ARGS_CAP; ++i) {
+        volatile u8 *rec = (volatile u8 *)(g_shim->args_base + i * ARGS_STRIDE);
+        volatile u32 *idp = (volatile u32 *)rec;
+        if (*idp == id) return rec;
+        if (!*idp && !empty) empty = rec;
+    }
+    return make ? empty : 0;
+}
+
+static void bootarg_set(const char *key, const char *value)
+{
+    const u32 id = bootarg_id(key);
+    volatile u8 *rec = bootarg_slot(id, 1);
+    u32 i;
+    if (!rec) return;                /* full, or the table did not fit at boot */
+    for (i = 0; i < ARGS_VALLEN - 1u && value[i]; ++i)
+        rec[4u + i] = (u8)value[i];
+    rec[4u + i] = 0;
+    /* id LAST: the same reason mc3_export writes it after the pointer - a
+     * reader that catches this mid-write should see either nothing or the
+     * whole value, never a live id paired with a half-written string. */
+    *(volatile u32 *)rec = id;
+    g_shim->args_n += 1u;
 }
 
 static u32 snap_originals(const mc3_group *tab, int count)
@@ -677,7 +792,21 @@ enum {
 
 static int defer_add(const char *path, u8 mode)
 {
-    u32 len = (u32)strlen(path) + 2u; /* mode + path terminator */
+    u32 path_len = (u32)strlen(path);
+    u32 stored_len = path_len;
+    u32 len;
+
+    /* The game's coreRaw disc backend canonicalizes cdrom0: names itself and
+     * ALWAYS appends ";1" before issuing the open. mc3boot/newlib needs the
+     * ISO-9660 version suffix while it is still the active program, but handing
+     * that same spelling to core.mod makes the game ask for "...;1;1". Keep
+     * the boot-time path intact and strip only the queued copy. */
+    if (path_len >= 9u &&
+        !strncmp(path, "cdrom", 5) && path[6] == ':' &&
+        path[path_len - 2u] == ';' && path[path_len - 1u] == '1')
+        stored_len -= 2u;
+
+    len = stored_len + 2u; /* mode + path terminator */
     if (!defer_next) {
         g_defer->magic = DEFER_MAGIC;
         g_defer->count = 0;
@@ -688,8 +817,9 @@ static int defer_add(const char *path, u8 mode)
         return 0;
     }
     *defer_next++ = mode;
-    memcpy(defer_next, path, len - 1u);
-    defer_next += len - 1u;
+    memcpy(defer_next, path, stored_len);
+    defer_next[stored_len] = 0;
+    defer_next += stored_len + 1u;
     g_defer->count += 1;
     scr_printf("  mod      %-22s %s (%s)\n", path,
                MODE_IS_SHIM(mode) ? "early" : "deferred",
@@ -890,6 +1020,13 @@ static u32 read_ini(u32 flags)
                 scr_printf("  ini      unknown group: %s\n", key);
                 ++ignored;
             }
+        } else if (!strcmp(sec, "boot")) {
+            /* Free-form: any key, any value. Which keys mean anything is up to
+             * whichever module reads them - this section does not know and
+             * does not validate, the same way [mods] does not know what a
+             * module's own hooks do. */
+            bootarg_set(key, value);
+            ++applied;
         }
     }
     scr_printf("  ini      %s  %d lines applied, %d ignored\n",
@@ -1012,6 +1149,7 @@ int main(int argc, char *argv[])
      * module's hooks are live from boot - so the export table has to exist
      * before the first one of them can run. */
     reserve_registry();
+    reserve_bootargs();
 
     flags = read_ini(flags);
     *(volatile u32 *)MC3_CFG       = MC3_CFG_MAGIC;
@@ -1097,6 +1235,8 @@ int main(int argc, char *argv[])
                                           ? g_shim->orig_n : 0u, 3);
     sio_puts(" reg=");            sio_hex(g_shim->magic == MC3_SHIM_MAGIC
                                           ? g_shim->reg_cap : 0u, 3);
+    sio_puts(" args=");           sio_hex(g_shim->magic == MC3_SHIM_MAGIC
+                                          ? g_shim->args_n : 0u, 3);
     sio_puts(" hooks=");          sio_hex((u32)hook_count, 3);
     sio_puts(" mods=");           sio_hex((u32)mod_loaded, 3);
     sio_puts("\n");

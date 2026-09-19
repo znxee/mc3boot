@@ -159,6 +159,34 @@ example.
 `defer` deliberately keeps loading on the first frame. Loading everything early
 would move the ground under mods written against that contract.
 
+### `[boot]` — configuration a mod reads instead of hard-codes
+
+```ini
+[boot]
+city = detroit
+```
+
+Testing one specific thing — boot straight into a given city, a given car once
+that mod exists too — used to mean a constant baked into the `.cpp`, a rebuild,
+and a copy to HostFS for every change. `[boot]` lines are free-form `key =
+value` pairs a module can ask for at run time:
+
+```c
+#include "../../payload/mc3_bootargs.h"
+
+const char *city = mc3_bootarg(MC3_ID('c','i','t','y'));
+if (city) { /* use it */ }   // NULL: the key was not set this boot
+```
+
+The key is folded into the same four-character id `mc3_registry.h` already
+defines for calling between mods — a string literal in a `.mod` is a data base
+and `mc3_mkmod` refuses a build where GCC shares one `lui` across several (see
+`docs/WRITING_A_MOD.md`), so a module never compares strings; only the loader,
+which has a real libc, touches the key text. `mods/city_force` is the worked
+example: it reads `[boot] city`, resolves the name against the game's own live
+city table, and falls back to a compiled-in default when the key is absent or
+does not resolve to anything registered.
+
 ---
 
 ## The space budget
@@ -210,6 +238,7 @@ HI16`).
 | `draw_distance` | A real option: a menu row, a saved setting, and an assembly trampoline that rewrites its own `lui` immediate. |
 | `patches_menu` | Taking over a whole menu screen the game builds and never uses. |
 | `registry_provider` + `registry_demo` | One mod calling a function that lives in another. |
+| `city_force` | Reading `[boot]` from the `.ini` instead of a compiled-in constant. |
 | `core` | The module that loads the other modules. Read it last. |
 
 ---
