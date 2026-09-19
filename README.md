@@ -222,25 +222,58 @@ That still means writing an ordinary hook, the same as everything else here.
 
 ### `[boot]` flags that already had somewhere to land
 
-Three did: `mods/race_bootargs` reads `time`, `weather` and `racetype` and
-calls the game's own setters —
-`mcRaceConfig::SetTOD`/`SetWeather`/`SetRaceType` — the exact three functions
-a race's own text file already drives. Each validates its string against a
-fixed table (`dawn`/`midnight`/`dusk`, `clear`/`cloudy`/`rainy`, and 23 race
-types from `roam` to `ordered_track`) and ignores anything else, so there was
-no guard to write by hand:
+Three did: `mods/race_bootargs` reads `time`, `weather` and `racetype` into
+the same fields `mcRaceConfig::SetTOD`/`SetWeather`/`SetRaceType` fill when
+a race's own text file is read. Names come from fixed tables in the
+executable (`dawn`/`midnight`/`dusk`, `clear`/`cloudy`/`rainy`, and 23 race
+types from `roam` to `ordered_track`).
+
+It does not call those setters, and an earlier version of this README was
+wrong to say they ignore a bad name: each one ends in `while (1);` when
+nothing matches — retail's compiled-out assert — so a typo in the `.ini`
+hung the game. `payload/mc3_raceconfig.h` does the same table walk, returns
+`-1` instead, and the mods only store an index they found. `SetCity` has the
+same trap.
 
 ```ini
 [boot]
 time = dusk
 weather = rainy
-racetype = trial
+racetype = roam
 ```
 
-One flag from the same wishlist did not have anywhere to land at all, and
-why is worth keeping rather than guessing again later: a race's text format
-still accepts a `ForcedCar` key, but disassembly shows it reads the value
-and never uses it — vestigial, like `ResponseFile` above.
+### `[boot] nofe` — straight into the city, no movies, no front end
+
+`mods/race_nofe` is the alpha's `-nofe` rebuilt from what retail kept. The
+one request retail's `Main` makes is "play the Rockstar logo" (code `0x10`);
+the front end is only requested later, when the chain of logo movies ends.
+Rewriting that one request to "load a race" (code `6`) skips both.
+
+What that alone produced was a loading screen that never finished — found by
+screenshotting the emulator and then reading a savestate taken on that
+screen: the main thread was sitting in the `while (1);` after a failed load
+of `$/resources/vehicle/blank/blank`. The player's car is only a placeholder
+until the front end picks one. So `race_nofe` also sets the car, and applies
+`city`/`time`/`weather`/`racetype` itself before the request — per-frame
+modules only run once a city is up, too late for this path.
+
+```ini
+[boot]
+nofe = 1
+car = vp_charger_69      ; a name from ASSETS/resources/vehicle; bad names fall back
+city = detroit
+time = dusk
+weather = rainy
+```
+
+Verified on screen: Detroit, snowing (how the game renders `rainy` there),
+dusk, the '69 Charger, about ten seconds after boot.
+
+One flag from the same wishlist did not have anywhere to land in the race
+format itself: a race's text file still accepts a `ForcedCar` key, but
+disassembly shows it reads the value and never uses it — vestigial, like
+`ResponseFile` above. `[boot] car` above goes through the player's car
+config instead, and only on the `nofe` path so far.
 
 `maxopponents` turned out to have somewhere to land after all, once checked
 against the alpha build instead of assumed absent: `mods/race_maxopponents`
@@ -309,6 +342,7 @@ HI16`).
 | `native_bootargs` | Feeding `[boot]` into the game's own, still-functional `datArgParser`. |
 | `race_bootargs` | `[boot] time`/`weather`/`racetype`, applied through the game's own setters. |
 | `race_maxopponents` | `[boot] maxopponents`, clamped after the game's own opponent loader runs. |
+| `race_nofe` | `[boot] nofe`: boot straight into a city with a chosen car, no movies or front end. |
 | `core` | The module that loads the other modules. Read it last. |
 
 ---
