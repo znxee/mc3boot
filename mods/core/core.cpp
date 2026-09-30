@@ -39,17 +39,16 @@
 #include "../../payload/mc3_modfmt.h"
 #include "../../payload/mc3_sio.h"
 
-// The game's own file API, the same entry points and the same argument the
-// in-image loader has been using since the first payload.
+// Raw wrappers from the game's active file table. Stream::Open sits above these
+// and invokes a filter callback which rejects root .MOD files on the disc. The
+// wrappers still provide the game's synchronization and cdrom path canonicalizer
+// (including adding the ISO-9660 ;1 suffix), but do not apply that asset filter.
 enum {
-    STREAM_OPEN  = 0x003991F0,   // Stream* Open(const char*, int methods)
-    STREAM_READ  = 0x003993A8,   // int Read(Stream*, void*, int)
-    STREAM_CLOSE = 0x00399748,   // void Close(Stream*)
-    STREAM_SIZE  = 0x003997A8,   // int Size(Stream*)
-    // 1 selects the coreRaw method table - raw open/read/close. With 0 the call
-    // takes a different structure and returns null.
-    STREAM_RAW   = 1,
-
+    RAW_OPEN  = 0x00398830,       // int Open(const char*, int flags)
+    RAW_SEEK  = 0x00398880,       // int Seek(int fd, int offset, int origin)
+    RAW_READ  = 0x003988D0,       // int Read(int fd, void*, int)
+    RAW_CLOSE = 0x003988F8,       // void Close(int fd)
+    RAW_RDONLY = 1,
     GAME_LO = 0x001A0000,
     GAME_HI = 0x00715D3C,
 };
@@ -79,6 +78,7 @@ struct mc3_core_trace {
 };
 static mc3_core_trace *const g_trace = (mc3_core_trace *)0x0061CAC0;
 #define CORE_MAGIC 0x4D433352u
+static void flush();
 
 enum { E_NONE = 0, E_OPEN, E_SIZE, E_ALLOC, E_READ, E_PLACE };
 
@@ -111,13 +111,15 @@ enum {
 
 static int load_one(const char *path, mc3_u8 mode, mc3_u32 *callbacks)
 {
-    mc3_u32 stream = MC3_CALL2(mc3_u32, STREAM_OPEN, const char *, int)
-                        (path, STREAM_RAW);
-    if (!stream) { g_trace->last_err = E_OPEN; return 0; }
+    const int fd = MC3_CALL2(int, RAW_OPEN, const char *, int)
+                       (path, RAW_RDONLY);
+    // File descriptor zero is valid in the game's raw backend.
+    if (fd < 0) { g_trace->last_err = E_OPEN; return 0; }
 
-    const int size = MC3_CALL1(int, STREAM_SIZE, mc3_u32)(stream);
-    if (size <= (int)MC3M_HDR) {
-        MC3_CALL1(void, STREAM_CLOSE, mc3_u32)(stream);
+    const int size = MC3_CALL3(int, RAW_SEEK, int, int, int)(fd, 0, 2);
+    if (size <= (int)MC3M_HDR ||
+        MC3_CALL3(int, RAW_SEEK, int, int, int)(fd, 0, 0) < 0) {
+        MC3_CALL1(void, RAW_CLOSE, int)(fd);
         g_trace->last_err = E_SIZE;
         return 0;
     }
@@ -126,14 +128,13 @@ static int load_one(const char *path, mc3_u8 mode, mc3_u32 *callbacks)
     // handed straight back - it is only needed for the length of this call.
     void *file = mc3_alloc((mc3_u32)size);
     if (!file) {
-        MC3_CALL1(void, STREAM_CLOSE, mc3_u32)(stream);
+        MC3_CALL1(void, RAW_CLOSE, int)(fd);
         g_trace->last_err = E_ALLOC;
         return 0;
     }
 
-    const int got = MC3_CALL3(int, STREAM_READ, mc3_u32, void *, int)
-                        (stream, file, size);
-    MC3_CALL1(void, STREAM_CLOSE, mc3_u32)(stream);
+    const int got = MC3_CALL3(int, RAW_READ, int, void *, int)(fd, file, size);
+    MC3_CALL1(void, RAW_CLOSE, int)(fd);
     if (got != size) { mc3_free(file); g_trace->last_err = E_READ; return 0; }
 
     const mc3_u32 code_size = ((const mc3_u32 *)file)[3];
@@ -159,6 +160,10 @@ static int load_one(const char *path, mc3_u8 mode, mc3_u32 *callbacks)
             callbacks[n + 1] = m.entry;
             callbacks[0] = n + 1;
         } else {
+            // A *_once entry runs inside load_one, before the pass-wide flush.
+            // Without this the EE may execute stale instructions from the
+            // just-allocated heap block.
+            flush();
             ((void (*)())m.entry)();
         }
     }
@@ -252,6 +257,7 @@ extern "C" void core_early()
     load_pass(1, callbacks);
     flush();
     mc3_sio_mark(69, 65, 82, 76, g_trace->loaded);   // EARL <loaded so far>
+    mc3_sio_mark(69, 82, 82, 33, g_trace->last_err); // ERR! <last stage>
 }
 
 // Runs once, on the first frame. Hooked at a per-frame site, so "once" has to be
@@ -283,6 +289,7 @@ static void core_once()
     // landed in a shim slot instead of patching the game word - n > 0 is the
     // proof that boot and a load pass agreed about a site.
     mc3_sio_mark(68, 69, 70, 82, g_trace->loaded);       // DEFR
+    mc3_sio_mark(69, 82, 82, 33, g_trace->last_err);     // ERR!
     mc3_sio_mark(83, 72, 73, 77, MC3M_SHIM_HITS);        // SHIM
 }
 
@@ -312,4 +319,5 @@ extern "C" void mod_main()
         for (mc3_u32 i = 0; i < count; ++i)
             ((void (*)())callbacks[i + 1])();
     }
+
 }

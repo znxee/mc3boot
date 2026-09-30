@@ -425,7 +425,7 @@ static void reserve_registry(void)
  *
  *  WHY THIS EXISTS
  *
- *  Testing a specific scene - "boot straight into modcity", "boot with car X
+ *  Testing a specific scene - "boot straight into losangeles", "boot with car X
  *  selected" - used to mean a constant baked into a .cpp, a rebuild, and a
  *  copy to HostFS for every single change. The .ini is already read before any
  *  module runs; this just gives a module a way to ask it a question, the same
@@ -438,7 +438,7 @@ static void reserve_registry(void)
  *  compares strings - it asks for MC3_ID('c','i','t','y'), the exact macro
  *  payload/mc3_registry.h already defines, reused here rather than duplicated.
  *  An .ini key is folded into the same four bytes by keeping only its first
- *  four characters, so writing `city = modcity` in the .ini and asking for
+ *  four characters, so writing `city = losangeles` in the .ini and asking for
  *  MC3_ID('c','i','t','y') refer to the same slot without either side needing
  *  to know that about the other beyond the four letters lining up.
  *

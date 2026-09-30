@@ -97,6 +97,36 @@ static mc3_u32 mc3_heap_free(mc3_u32 alloc)
     return top > cur ? top - cur : 0u;
 }
 
+// The largest block a new allocation could get: the biggest FREE block of
+// the heap or the gap between cursor and top, whichever is larger. The gap
+// alone is not enough: after the front end is released the heap keeps a
+// 14 MB free block below a cursor that stayed high, and the gap reads ~1 MB
+// (measured on the arcade route into a city). Block layout, as
+// memMemoryAllocator::GetStats 0x003B08D8 walks it: 16-byte header,
+// +0 bit0 = in use, +4 data size, next header at +16 + size rounded to 16.
+static mc3_u32 mc3_heap_largest(mc3_u32 alloc)
+{
+    if (!mc3_ptr_ok(alloc))
+        return 0u;
+    const mc3_u32 base = *(volatile mc3_u32 *)(alloc + MC3_ALLOC_BASE);
+    const mc3_u32 top = *(volatile mc3_u32 *)(alloc + MC3_ALLOC_TOP);
+    const mc3_u32 cur = *(volatile mc3_u32 *)(alloc + MC3_ALLOC_CURSOR);
+    mc3_u32 best = top > cur ? top - cur : 0u;
+    if (!mc3_ptr_ok(base) || top > 0x02000000u)
+        return best;
+    mc3_u32 p = base;
+    for (mc3_u32 n = 0; p + 16u <= top && n < 0x40000u; ++n) {
+        const mc3_u32 flags = *(volatile mc3_u32 *)p;
+        const mc3_u32 size = *(volatile mc3_u32 *)(p + 4u);
+        if (size > 0x02000000u)
+            break;
+        if (!(flags & 1u) && size > best)
+            best = size;
+        p += 16u + ((size + 15u) & ~15u);
+    }
+    return best;
+}
+
 static mc3_u32 mc3_heap_base(mc3_u32 alloc)
 {
     return mc3_ptr_ok(alloc) ? *(volatile mc3_u32 *)(alloc + MC3_ALLOC_BASE) : 0u;

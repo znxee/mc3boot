@@ -3,14 +3,14 @@
  *
  *  THE PROBLEM
  *
- *  Testing one specific thing - boot straight into modcity, boot with a given
+ *  Testing one specific thing - boot straight into losangeles, boot with a given
  *  car selected, skip past a menu - used to mean a constant baked into a
  *  .cpp, a rebuild, and a copy to HostFS, for every single change. The .ini is
  *  already read before any module runs; this lets a module ask it a question
  *  instead of hard-coding the answer.
  *
  *      [boot]
- *      city = modcity
+ *      city = losangeles
  *      car  = vp_eclipse_04
  *
  *      const char *city = mc3_bootarg(MC3_ID('c','i','t','y'));
@@ -23,7 +23,7 @@
  *  MC3_ID (from mc3_registry.h) is already the fix for exactly this, so
  *  boot-args reuses it rather than inventing a second convention: an .ini key
  *  is folded into the same four bytes by mc3boot.c keeping only its first
- *  four characters, so `city = modcity` and MC3_ID('c','i','t','y') name the
+ *  four characters, so `city = losangeles` and MC3_ID('c','i','t','y') name the
  *  same slot. A key past four characters still works in the .ini - only the
  *  first four decide which slot it lands in, so keep keys short and distinct
  *  in that prefix.

@@ -269,6 +269,11 @@ weather = rainy
 Verified on screen: Detroit, snowing (how the game renders `rainy` there),
 dusk, the '69 Charger, about ten seconds after boot.
 
+`rnam` picks the race: the END of a race name listed in the city's `.loc`
+(bootarg values are short, 31 characters), e.g. `rnam = arcade_circuit_two`
+for `circuit\mc2\lachris_arcade_circuit_two`. The full name comes from the
+city record's race list; without `rnam` the city's first race is used.
+
 `garage = 1` instead of `nofe` asks for the garage (code `0x12`, what the
 alpha's `-garage` did) and opens it in "Buy Vehicles" - most likely because
 the memory card save is only loaded through the front end, so the player
@@ -347,7 +352,7 @@ HI16`).
 | `native_bootargs` | Feeding `[boot]` into the game's own, still-functional `datArgParser`. |
 | `race_bootargs` | `[boot] time`/`weather`/`racetype`, applied through the game's own setters. |
 | `race_maxopponents` | `[boot] maxopponents`, clamped after the game's own opponent loader runs. |
-| `race_nofe` | `[boot] nofe`: boot straight into a city with a chosen car, no movies or front end. |
+| `race_nofe` | `[boot] nofe`: boot straight into a city with a chosen car and race (`rnam`), no movies or front end. |
 | `core` | The module that loads the other modules. Read it last. |
 
 ---

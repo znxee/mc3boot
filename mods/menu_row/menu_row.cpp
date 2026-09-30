@@ -80,13 +80,13 @@ enum {
     SCREEN_SELECT     = 28,
     MODE_FLAG         = 0x00617AEC,   // 0 Career, 1 Tokyo, 2 ours
     MODE_AUX          = 0x00617AE0,   // both callbacks zero this
-    MODE_MODCITY      = 2,
+    MODE_LOSANGELES      = 2,
 
     // mcRaceConfig-ish setter: [+80] = index always, [+84] = index only when
     // it is below 3. So it already handles 3 and above generically - there is
     // no clamp to work around here.
     SET_CITY          = 0x004C7960,
-    MODCITY_INDEX     = 5,
+    LOSANGELES_INDEX     = 5,
 
     // The second index sink, and the one that actually decided the first test.
     // The Tokyo route writes 3 into *(*(0x00619B14)) with a bare `sw` at
@@ -148,14 +148,14 @@ static inline int valid(mc3_u32 p)
 //  transition runs on rails the shipped code already uses. The only thing left
 //  to change is which city screen 28 asks for, and that happens below.
 // -----------------------------------------------------------------------------
-extern "C" void mc3_modcity_chosen(mc3_u32 self)
+extern "C" void mc3_losangeles_chosen(mc3_u32 self)
 {
     (void)self;
     menu_trace *const t = (menu_trace *)MENU_TRACE;
     t->chosen += 1u;
 
     *(volatile mc3_u32 *)MODE_AUX = 0u;
-    *(volatile mc3_u8 *)MODE_FLAG = (mc3_u8)MODE_MODCITY;
+    *(volatile mc3_u8 *)MODE_FLAG = (mc3_u8)MODE_LOSANGELES;
 
     const mc3_u32 root = *(volatile mc3_u32 *)SCREEN_ROOT;
     if (valid(root))
@@ -180,8 +180,8 @@ extern "C" void mc3_modcity_chosen(mc3_u32 self)
 // -----------------------------------------------------------------------------
 extern "C" void mc3_set_city(mc3_u32 obj, int city)
 {
-    if (*(volatile mc3_u8 *)MODE_FLAG == (mc3_u8)MODE_MODCITY) {
-        city = MODCITY_INDEX;
+    if (*(volatile mc3_u8 *)MODE_FLAG == (mc3_u8)MODE_LOSANGELES) {
+        city = LOSANGELES_INDEX;
         ((menu_trace *)MENU_TRACE)->substituted += 1u;
     }
     MC3_CALL2(void, SET_CITY, mc3_u32, int)(obj, city);
@@ -242,7 +242,7 @@ static __attribute__((noinline)) mc3_u32 handler_address()
 
 static __attribute__((noinline)) mc3_u32 callback_address()
 {
-    return (mc3_u32)(void *)&mc3_modcity_chosen;
+    return (mc3_u32)(void *)&mc3_losangeles_chosen;
 }
 
 // The `jal` this borrows to get called at init. NOT 0x001A0F40 - city_slot6.mod
@@ -293,7 +293,7 @@ extern "C" void mc3_city_select()
 {
     MC3_CALL(void, CITY_SELECT_FN)();
 
-    if (*(volatile mc3_u8 *)MODE_FLAG != (mc3_u8)MODE_MODCITY)
+    if (*(volatile mc3_u8 *)MODE_FLAG != (mc3_u8)MODE_LOSANGELES)
         return;
 
     const mc3_u32 holder = *(volatile mc3_u32 *)CITY_HOLDER;
@@ -302,7 +302,7 @@ extern "C" void mc3_city_select()
 
     menu_trace *const t = (menu_trace *)MENU_TRACE;
     t->holder_was = *(volatile mc3_u32 *)holder;
-    *(volatile mc3_u32 *)holder = (mc3_u32)MODCITY_INDEX;
+    *(volatile mc3_u32 *)holder = (mc3_u32)LOSANGELES_INDEX;
     t->corrected += 1u;
 }
 

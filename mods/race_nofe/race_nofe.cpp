@@ -1,6 +1,7 @@
 // -----------------------------------------------------------------------------
 //  race_nofe - `[boot] nofe = 1` skips the logo movies and the front end and
-//  boots straight into a race; `[boot] car = <vehicle>` picks the car.
+//  boots straight into a race; `[boot] car = <vehicle>` picks the car and
+//  `[boot] rnam = <end of a race name in the city's .loc>` the race.
 //
 //  WHAT THE ALPHA DID
 //
@@ -91,6 +92,9 @@ enum {
     PLAYER0_CAR    = 276 + 12,     // cfg + 276 + 44*i is player i; +12 is its mcCarConfig*
     SET_CAR_NAME   = 0x004AF7D0,   // mcCarConfig::SetVehicleTypeByName(this, name)
     LOOKUP_CAR     = 0x004B2AE0,   // mc::LookupCar(name) -> index, or -1
+    SET_RACE_NAME  = 0x004BE7B0,   // mcRaceConfig::SetRaceName = strcpy(this+104)
+    CITY_ARRAY     = 0x00619D4C,   // &city record[0], 76 bytes each
+    CITY_STRIDE    = 76,
 };
 
 struct rnf_state {
@@ -162,6 +166,45 @@ static void apply_race_keys(void)
           MC3_RC_F_RACETYPE, 'R', 'N', 'R', 'T');
 }
 
+// [boot] rnam = the END of a race name of the city's .loc (bootarg values are
+// short, 31 chars), e.g. `arcade_circuit_two`. The full name comes from the
+// city record (+0x14 race count, +0x18 array of names).
+static void pick_race(void)
+{
+    const char *const rnam = mc3_bootarg(MC3_ID('r', 'n', 'a', 'm'));
+    const mc3_u32 cur = *(volatile mc3_u32 *)CFG_CURRENT;
+    const mc3_u32 table = *(volatile mc3_u32 *)CITY_ARRAY;
+    if (!rnam || !rnam[0] || !sensato(cur) || !sensato(table))
+        return;
+    const mc3_u32 rec = table + *(volatile mc3_u32 *)cur * CITY_STRIDE;
+    const int count = *(volatile int *)(rec + 0x14);
+    const mc3_u32 names = *(volatile mc3_u32 *)(rec + 0x18);
+    int want = 0;
+    while (rnam[want]) ++want;
+    const char *found = 0;
+    for (int i = 0; sensato(names) && i < count && !found; ++i) {
+        const char *n = *(const char *const *)(names + 4u * (mc3_u32)i);
+        if (!sensato((mc3_u32)n & ~3u)) continue;
+        int len = 0;
+        while (n[len]) ++len;
+        if (len < want) continue;
+        int k = 0;
+        while (k < want && n[len - want + k] == rnam[k]) ++k;
+        if (k == want) found = n;
+    }
+    if (found) {
+        const mc3_u32 cfgs[2] = { *(volatile mc3_u32 *)CFG_NEXT, cur };
+        for (int i = 0; i < 2; ++i)
+            if (sensato(cfgs[i])) {
+                MC3_CALL2(void, SET_RACE_NAME, mc3_u32, const char *)(cfgs[i], found);
+                // +72 set = GetRaceIndex answers the byte at +71 and ignores the
+                // name (the arcade's own override); clear it so the name counts
+                *(volatile unsigned char *)(cfgs[i] + 72u) = 0;
+            }
+    }
+    tag('R', 'N', 'N', 'M'); text(found ? found : rnam); put(10);   // RNNM <race picked>
+}
+
 extern "C" void race_nofe_hook(mc3_u32 movie_config, const char *movie_name)
 {
     MC3_CALL2(void, SET_MOVIE, mc3_u32, const char *)(movie_config, movie_name);
@@ -191,6 +234,7 @@ extern "C" void race_nofe_hook(mc3_u32 movie_config, const char *movie_name)
     set_player_car(CFG_CURRENT, car);
     tag('R', 'N', 'C', 'R'); text(car); put(10);                    // RNCR <car in use>
     apply_race_keys();
+    pick_race();
 
     *word = (mc3_u32)(want_garage ? CODE_GARAGE : CODE_LOADRACE);
     MC3_CALL1(void, FLUSH_CACHE, int)(0);

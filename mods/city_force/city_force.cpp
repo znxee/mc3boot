@@ -3,7 +3,7 @@
 //  independent of what the memory card save says.
 //
 //  WHICH CITY, without a rebuild: `[boot] city = <name>` in mc3boot.ini. Named
-//  by the same text the .lst/.loc files use ("modcity", "sd", "atlanta", ...);
+//  by the same text the .lst/.loc files use ("losangeles", "sd", "atlanta", ...);
 //  see payload/mc3_bootargs.h for the mechanism and mc3boot's README for the
 //  .ini side. No [boot] section, or a name that does not resolve, and this
 //  falls back to TARGET_CITY_DEFAULT below.
@@ -13,7 +13,7 @@
 //  "The city index comes from the memory card save" pointed at the right
 //  field - *(*(0x00619B10)) is exactly the byte city_probe.mod's `SES:` line
 //  already reads, and COMO_TESTO.md already established the correlation:
-//  SES 00000000 = sd, SES 00000005 = modcity, measured across many boots.
+//  SES 00000000 = sd, SES 00000005 = losangeles, measured across many boots.
 //
 //  Finding the EXACT instruction that writes it from the save turned out to be
 //  a longer chase than expected, and this module does not finish that chase.
@@ -72,7 +72,7 @@ enum {
 
     // The compiled-in fallback, used when [boot] carries no `city` key, or
     // names one that does not resolve. 1 = Atlanta: chosen for the first test
-    // because the memory card in use already had 5 (modcity) saved, and
+    // because the memory card in use already had 5 (losangeles) saved, and
     // forcing a DIFFERENT retail city was the clean, unambiguous proof that
     // this overrides the save rather than coincidentally agreeing with it.
     TARGET_CITY_DEFAULT = 1,

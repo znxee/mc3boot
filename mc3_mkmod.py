@@ -90,7 +90,7 @@ def _sections(d):
         b = so + i * ss
         name, typ, flags, addr, off, size, link, info, align, entsz = \
             struct.unpack_from('<IIIIIIIIII', d, b)
-        hdrs.append(dict(name=name, type=typ, addr=addr, off=off, size=size,
+        hdrs.append(dict(name=name, type=typ, flags=flags, addr=addr, off=off, size=size,
                          link=link, info=info, entsz=entsz))
     strtab = hdrs[shstr]
     for h in hdrs:
@@ -99,8 +99,8 @@ def _sections(d):
     return hdrs
 
 
-def _relocs(d, hdrs, base):
-    """[(offset no modulo, tipo ELF)] de todas as secoes REL."""
+def _relocs(d, hdrs, base, memsz):
+    """[(offset no modulo, tipo ELF)] apenas de secoes carregadas."""
     out = []
     for h in hdrs:
         # n32 usa RELA (12 bytes, com addend explicito), nao REL. O addend nao
@@ -112,6 +112,17 @@ def _relocs(d, hdrs, base):
             passo, campos = 8, '<II'
         else:
             continue
+        # sh_info identifies the section being patched. Debug sections such
+        # as .pdr have their own relocations and often start at address zero;
+        # treating those offsets as .text overwrites live instructions.
+        if h['info'] >= len(hdrs):
+            raise SystemExit('relocacao com secao alvo invalida')
+        target = hdrs[h['info']]
+        if not (target['flags'] & 0x2):  # SHF_ALLOC
+            continue
+        if not (base <= target['addr'] and
+                target['addr'] + target['size'] <= base + memsz):
+            raise SystemExit('relocacao em secao alocada fora do PT_LOAD')
         for i in range(h['size'] // passo):
             vals = struct.unpack_from(campos, d, h['off'] + i * passo)
             off, info = vals[0], vals[1]
@@ -130,7 +141,7 @@ def build(elf_path, out_path, entry_sym='payload_main'):
     hdrs = _sections(d)
     entry = struct.unpack_from('<I', d, 0x18)[0] - va
 
-    brutas = _relocs(d, hdrs, va)
+    brutas = _relocs(d, hdrs, va, msz)
     dentro = [(o, t) for o, t in brutas if 0 <= o < len(code)]
     fora = len(brutas) - len(dentro)
 
