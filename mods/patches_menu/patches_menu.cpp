@@ -460,6 +460,73 @@ static int needs_reload(const char *name)
         || (name[0] == 'G' && name[1] == 'r' && name[2] == 'a');
 }
 
+// Short English labels (2026-10-01, Fork City MODS, user's request): the
+// group names are Portuguese config-file names and ran off the panel. One
+// line per group: a piece of its .ini name | row label | option label (the
+// option is what a family row shows for that member; empty for on/off rows).
+// Groups not listed keep the derived name below.
+static __attribute__((noinline)) const char *short_names(void)
+{
+    static const char s[] =
+        "Qualidade alta|Refl quality|\n"
+        "Mapa 512x512|Refl map 512|\n"
+        "FOV 150 (cidade)|Refl FOV city|\n"
+        "FOV 150 (garagem)|Refl FOV garage|\n"
+        "Far plane 2000|Refl far 2000|\n"
+        "Intensidade 0.50|Refl 50%|\n"
+        "Destravar para 60 fps|60 FPS|\n"
+        "loading @ 60 fps|Load flash|60\n"
+        "loading @ 120 fps|Load flash|120\n"
+        "Pedestres|Peds 60fps|\n"
+        "Orcamento para 60 fps|City budget|60\n"
+        "Orcamento para 90 fps|City budget|90\n"
+        "Orcamento para 120 fps|City budget|120\n"
+        "Orcamento para 240 fps|City budget|240\n"
+        "Orcamento para 1 fps|City budget|1\n"
+        "Distancia de desenho x2|Traffic x2|\n"
+        "Widescreen 16:9|Widescreen|\n"
+        "Modo 640x448|Video mode|448i\n"
+        "640x480 progressivo|Video mode|480p\n"
+        "Render targets em 640|Video mode|RT 640\n"
+        "Desativar motion blur|No blur|\n";
+    return s;
+}
+
+static int contains(const char *hay, const char *needle, int nlen)
+{
+    for (; *hay; ++hay) {
+        int i = 0;
+        while (i < nlen && hay[i] && hay[i] == needle[i]) ++i;
+        if (i == nlen) return 1;
+    }
+    return 0;
+}
+
+// The table line whose key occurs in `name`: row and option as (start, length).
+static int short_name(const char *name, const char **row, int *rowlen,
+                      const char **opt, int *optlen)
+{
+    for (const char *p = short_names(); *p; ) {
+        const char *k = p;
+        while (*p && *p != '|') ++p;
+        const int klen = (int)(p - k);
+        if (*p) ++p;
+        const char *r = p;
+        while (*p && *p != '|') ++p;
+        const int rlen = (int)(p - r);
+        if (*p) ++p;
+        const char *o = p;
+        while (*p && *p != '\n') ++p;
+        const int olen = (int)(p - o);
+        if (*p) ++p;
+        if (klen && contains(name, k, klen)) {
+            *row = r; *rowlen = rlen; *opt = o; *optlen = olen;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 // The game's font is sixteen bits per character - an 8-bit literal draws as
 // garbage - so ASCII is widened as it is copied.
 static void build_label(int row, int famidx)
@@ -476,6 +543,28 @@ static void build_label(int row, int famidx)
     const int count = fam_size(famidx);
     const int cur = fam_current(famidx);
     int plen = fam_prefix_len(famidx);
+
+    {   // the short English label, when the group has one
+        const char *r, *o; int rl, ol;
+        if (short_name(tab[g0].name, &r, &rl, &o, &ol)) {
+            for (int i = 0; i < rl && n < NAME_CHARS; ++i) out[n++] = (mc3_u16)(unsigned char)r[i];
+            out[n++] = 58;  out[n++] = 32;                       /* ": " */
+            int g = -1;
+            if (cur >= 0) fam_member(famidx, cur, &g);
+            if (cur < 0) {
+                out[n++] = 79; out[n++] = 70; out[n++] = 70;                 /* OFF */
+            } else if (g >= 0 && short_name(tab[g].name, &r, &rl, &o, &ol) && ol) {
+                for (int i = 0; i < ol && n < LABEL_CHARS - 4; ++i) out[n++] = (mc3_u16)(unsigned char)o[i];
+            } else {
+                out[n++] = 79; out[n++] = 78;                                /* ON  */
+            }
+            if (needs_reload(tab[g0].name) && n < LABEL_CHARS - 3) {
+                out[n++] = 32;  out[n++] = 42;                   /* " *" */
+            }
+            out[n] = 0;
+            return;
+        }
+    }
 
     if (count > 1) {
         const char *const a = plain_name(&tab[g0]);
@@ -499,9 +588,9 @@ static void build_label(int row, int famidx)
     out[n++] = 58;  out[n++] = 32;                       /* ": " */
 
     if (cur < 0) {
-        out[n++] = 68; out[n++] = 69; out[n++] = 83; out[n++] = 76;  /* DESL */
+        out[n++] = 79; out[n++] = 70; out[n++] = 70;                 /* OFF */
     } else if (count == 1) {
-        out[n++] = 76; out[n++] = 73; out[n++] = 71;                 /* LIG  */
+        out[n++] = 79; out[n++] = 78;                                /* ON  */
     } else {
         int g;
         if (fam_member(famidx, cur, &g)) {
@@ -635,11 +724,47 @@ extern "C" void patch_row_pressed(mc3_u32 bound)
 
 // The top-level "Patches" row: ask the brain for the state that lands on
 // mcMenuVideo.
+//
+// The camera stays where the top menu has it (2026-10-01, Fork City MODS): the
+// borrowed screen carries its own per-city camera (mcScreenBase +152 look-at
+// [4], +200 target [4], read by mcMenuShell::MoveFECamera from the screen at
+// *(root+12)+0x34 for state 10), and it pointed somewhere else. The camera the
+// view is heading to now (mc3FeView 0x617980: +1616 look-at, +1628 target) is
+// copied into all four city slots of that screen first.
+enum { FE_VIEW = 0x00617980, VIEW_LOOKAT = 1616, VIEW_TARGET = 1628,
+       VIDEO_SCREEN = 0x34, SCREEN_LOOKAT = 152, SCREEN_TARGET = 200 };
+static void keep_camera(mc3_u32 root)
+{
+    const mc3_u32 screens = *(volatile mc3_u32 *)(root + SCREEN_OWNER);
+    const mc3_u32 view = *(volatile mc3_u32 *)FE_VIEW;
+    if (!valid_pointer(screens) || !valid_pointer(view))
+        return;
+    const mc3_u32 video = *(volatile mc3_u32 *)(screens + VIDEO_SCREEN);
+    if (!valid_pointer(video))
+        return;
+    // Its layout too (menuvideo.ui: X 161, Y 190, zoom 1.15, rows of 22 -
+    // thirteen rows overlapped there): the top menu's place, smaller text.
+    // mcScreenBase: +96 X, +98 Y (s16), +100 row height, +104 vert offset
+    // (s32), +108 text zoom (float).
+    *(volatile short *)(video + 96) = 40;
+    *(volatile short *)(video + 98) = 170;
+    *(volatile int *)(video + 100) = 22;
+    *(volatile int *)(video + 104) = -6;
+    *(volatile mc3_u32 *)(video + 108) = 0x3F4CCCCDu;      /* 0.8f */
+    for (int k = 0; k < 4; ++k)
+        for (int c = 0; c < 3; ++c) {
+            *(volatile mc3_u32 *)(video + SCREEN_LOOKAT + 12 * k + 4 * c) =
+                *(volatile mc3_u32 *)(view + VIEW_LOOKAT + 4 * c);
+            *(volatile mc3_u32 *)(video + SCREEN_TARGET + 12 * k + 4 * c) =
+                *(volatile mc3_u32 *)(view + VIEW_TARGET + 4 * c);
+        }
+}
 extern "C" void open_patches(mc3_u32 /*bound*/)
 {
     const mc3_u32 root = *(volatile mc3_u32 *)SCREEN_ROOT;
     if (!valid_pointer(root))
         return;
+    keep_camera(root);
     MC3_CALL2(void, GOTO_SCREEN, mc3_u32, int)(root, VIDEO_STATE);
 }
 
