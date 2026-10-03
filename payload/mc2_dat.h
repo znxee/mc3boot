@@ -18,9 +18,13 @@
  *  Paths stay the ones mc2_city_config.h hands out (relative, mc2/...):
  *      mc2/<city>/city/<f>  ->  city/<city>/<f>
  *      mc2/tune/<f>         ->  tune/<f>
+ *      mc2/anim/<f>         ->  anim/<f>
+ *      mc2/bound/<f>        ->  bound/<f>
  *      mc2/<city>/<f>       ->  resource/<city>/<f>
  *  Only those entries are indexed (resource/ and city/ of losangeles and
- *  paris, tune/phys/), as {FNV-1a of the name, offset, size, stored size}.
+ *  paris, tune/phys/, and the LA/Paris props' anim/, bound/ and
+ *  tune/banger/ files: 1791 of 20021), as {FNV-1a of the name, offset, size,
+ *  stored size}.
  *
  *  Reading goes through the game's raw file layer (Stream::Open(path, false)):
  *  a large read is one disc command there, where the zip layer cuts every
@@ -52,7 +56,7 @@ enum {
     MD_FILE_BACKEND = 0x00618020, MD_ZIP_METHODS = 0x00619F58,
     MD_ZIP_SINGLE = 0x00619F44, MD_ZIP_LIST = 0x00619F4C, MD_ZIP_LOCATE = 0x004FAED8,
     MD_FILES = 8, MD_ZSTREAM = 80, MD_INBUF = 32768, MD_SCRATCH = 4096,
-    MD_MAX_KEEP = 1600, MD_MAX_RANGES = 64, MD_NAME = 160,
+    MD_MAX_KEEP = 2048, MD_MAX_RANGES = 64, MD_NAME = 160,
     MD_DISC_LOCATE = 0x00246350, MD_DISC_READ = 0x00245680, MD_FLUSH_CACHE = 0x00546C20,
     MD_SECTORS = 16
 };
@@ -92,13 +96,16 @@ static __attribute__((noinline)) const char *md_chars() {
 // Prefixes worth indexing (the rest of MC2's 20021 entries is never asked for).
 static __attribute__((noinline)) const char *md_keep_prefixes() {
     static const char s[] = "resource/losangeles/\0resource/paris/\0city/losangeles/\0"
-                            "city/paris/\0tune/phys/\0";
+                            "city/paris/\0tune/phys/\0anim/l_prop_\0anim/p_prop_\0"
+                            "bound/l_prop_\0bound/p_prop_\0tune/banger/l_\0tune/banger/p_\0";
     return s;
 }
 
 static __attribute__((noinline)) const char *md_s_tune() { static const char s[] = "tune/"; return s; }
 static __attribute__((noinline)) const char *md_s_city() { static const char s[] = "city/"; return s; }
 static __attribute__((noinline)) const char *md_s_resource() { static const char s[] = "resource/"; return s; }
+static __attribute__((noinline)) const char *md_s_anim() { static const char s[] = "anim/"; return s; }
+static __attribute__((noinline)) const char *md_s_bound() { static const char s[] = "bound/"; return s; }
 static __attribute__((noinline)) const char *md_s_slash() { static const char s[] = "/"; return s; }
 
 static void md_put(char c) { *(volatile mc3_u8 *)0x1000F180 = (mc3_u8)c; }
@@ -128,7 +135,10 @@ static int md_copy(char *d, int at, const char *s, int max) {
 static int md_map(const char *path, char *out) {
     if (!(path[0] == 'm' && path[1] == 'c' && path[2] == '2' && path[3] == '/')) return 0;
     const char *rest = path + 4;
-    if (md_starts(rest, md_s_tune())) { md_copy(out, 0, rest, MD_NAME); return 1; }
+    if (md_starts(rest, md_s_tune()) || md_starts(rest, md_s_anim()) || md_starts(rest, md_s_bound())) {
+        md_copy(out, 0, rest, MD_NAME);
+        return 1;
+    }
     int i = 0;
     while (rest[i] && rest[i] != '/') ++i;
     if (!rest[i] || i > 40) return 0;
