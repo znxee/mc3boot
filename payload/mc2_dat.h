@@ -22,9 +22,10 @@
  *      mc2/bound/<f>        ->  bound/<f>
  *      mc2/<city>/<f>       ->  resource/<city>/<f>
  *  Only those entries are indexed (resource/ and city/ of losangeles and
- *  paris, tune/phys/, and the LA/Paris props' anim/, bound/ and
- *  tune/banger/ files: 1791 of 20021), as {FNV-1a of the name, offset, size,
- *  stored size}.
+ *  paris and tokyo, tune/phys/, and the props' anim/, bound/ and
+ *  tune/banger/ files - not the cities' race/ folders, .pdef files or
+ *  directory entries, which nothing reads: 1669 of 20021), as {FNV-1a of the
+ *  name, offset, size, stored size}.
  *
  *  Reading goes through the game's raw file layer (Stream::Open(path, false)):
  *  a large read is one disc command there, where the zip layer cuts every
@@ -95,12 +96,35 @@ static __attribute__((noinline)) const char *md_chars() {
 }
 // Prefixes worth indexing (the rest of MC2's 20021 entries is never asked for).
 static __attribute__((noinline)) const char *md_keep_prefixes() {
-    static const char s[] = "resource/losangeles/\0resource/paris/\0city/losangeles/\0"
-                            "city/paris/\0tune/phys/\0anim/l_prop_\0anim/p_prop_\0"
-                            "bound/l_prop_\0bound/p_prop_\0tune/banger/l_\0tune/banger/p_\0";
+    static const char s[] = "resource/losangeles/\0resource/paris/\0resource/tokyo/\0"
+                            "city/losangeles/\0city/paris/\0city/tokyo/\0tune/phys/\0"
+                            "anim/l_prop_\0anim/p_prop_\0anim/t_prop_\0"
+                            "bound/l_prop_\0bound/p_prop_\0bound/t_prop_\0"
+                            "tune/banger/l_\0tune/banger/p_\0tune/banger/t_\0";
     return s;
 }
 
+static __attribute__((noinline)) const char *md_s_race() { static const char s[] = "/race/"; return s; }
+static __attribute__((noinline)) const char *md_s_pdef() { static const char s[] = ".pdef"; return s; }
+// Entries under a kept prefix that nothing opens: a city's race/ folder (MC2's
+// race .rsc), .pdef text and the directory entries themselves.
+static int md_skipped(const char *name, int len)
+{
+    if (len && name[len - 1] == '/') return 1;
+    if (len > 5) {
+        const char *e = md_s_pdef();
+        int k = 0;
+        while (e[k] && name[len - 5 + k] == e[k]) ++k;
+        if (!e[k]) return 1;
+    }
+    const char *r = md_s_race();
+    for (int i = 0; i + 6 <= len; ++i) {
+        int k = 0;
+        while (r[k] && name[i + k] == r[k]) ++k;
+        if (!r[k]) return 1;
+    }
+    return 0;
+}
 static __attribute__((noinline)) const char *md_s_tune() { static const char s[] = "tune/"; return s; }
 static __attribute__((noinline)) const char *md_s_city() { static const char s[] = "city/"; return s; }
 static __attribute__((noinline)) const char *md_s_resource() { static const char s[] = "resource/"; return s; }
@@ -296,7 +320,7 @@ static md_entry *md_index() {
             }
             name[len] = 0;
             for (int k = 0; k <= len; ++k) prev[k] = name[k];
-            if (kept >= MD_MAX_KEEP) continue;
+            if (kept >= MD_MAX_KEEP || md_skipped(name, len)) continue;
             for (const char *p = pres; *p; ) {
                 if (md_starts(name, p)) {
                     md_entry *e = &out[kept++];
