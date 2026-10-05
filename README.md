@@ -353,6 +353,7 @@ HI16`).
 | `race_bootargs` | `[boot] time`/`weather`/`racetype`, applied through the game's own setters. |
 | `race_maxopponents` | `[boot] maxopponents`, clamped after the game's own opponent loader runs. |
 | `race_nofe` | `[boot] nofe`: boot straight into a city with a chosen car and race (`rnam`), no movies or front end. |
+| `menu_state` | Publishing game state for a PC-side script: the front end's screen, menu rows and cursor, refreshed from `mcMenuShell::Update` (a vtable slot) into a block exported in the registry as `MNUS` - read over PCSX2's PINE by `mc3_menu_state.py`. |
 | `core` | The module that loads the other modules. Read it last. |
 
 ---
