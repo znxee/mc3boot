@@ -312,7 +312,7 @@ struct mc3_shim {
      * not what nativearg_add had just written. So argc rides in the array
      * instead - see reserve_nativeargs: a zero argv[] entry ends it, the same
      * "id 0 means free" convention bootarg_slot already uses. */
-    u32 argv_base;   /* char* argv[NATIVE_ARGS_CAP], zero-terminated */
+    u32 argv_base;   /* char* argv[nativeargs_cap], zero-terminated */
 };
 static struct mc3_shim *const g_shim = (struct mc3_shim *)MC3_SHIMHDR;
 static u32 shim_next = MC3_MODEND;      /* bump allocator, downward */
@@ -448,22 +448,55 @@ static void reserve_registry(void)
  *  building the table costs nothing unusual. Reading it back from a .mod is
  *  a byte compare against what THIS file already wrote, not a literal the mod
  *  authored itself, so it never becomes a second data base either.
+ *
+ *  THE SIZE follows the .ini. It was a fixed 16 slots, and once an install's
+ *  [boot] held 16 keys every key added after them was dropped without a word -
+ *  a test that put its keys at the end of the section just never saw them.
+ *  A fixed bigger table would cost every install that cave space whether it
+ *  uses it or not, so the table is now max(16, the [boot] key count) slots,
+ *  counted by count_boot_keys before the .ini is applied.
+ *
+ *  Never fewer than 16, because every module built before this change has
+ *  mc3_bootarg looping to a constant 16 and would read past a shorter table.
+ *  Those modules keep seeing the first 16 keys exactly as before; a module
+ *  rebuilt with the current payload/mc3_bootargs.h reads the capacity from
+ *  the two words right below the table:
+ *
+ *      args_base - 8   ARGS_CAP_MAGIC ('ACAP')
+ *      args_base - 4   capacity, in slots
+ *
+ *  They are not shim header fields because that header has no word left (see
+ *  argv_base). Under an older loader the same two words are the end of the
+ *  native argv[] array - a pointer and its zero terminator - which can never
+ *  read as the magic, so a new module falls back to 16 there.
  * ------------------------------------------------------------------------- */
-#define ARGS_CAP     16u
-#define ARGS_VALLEN  32u
-#define ARGS_STRIDE  (4u + ARGS_VALLEN)
+#define ARGS_MIN       16u
+#define ARGS_MAX       128u
+#define ARGS_VALLEN    32u
+#define ARGS_STRIDE    (4u + ARGS_VALLEN)
+#define ARGS_CAP_MAGIC 0x41434150u   /* MC3_ID('A','C','A','P') */
 
-static void reserve_bootargs(void)
+static u32 args_cap = 0;            /* slots in the table, 0 if it did not fit */
+static u32 args_dropped = 0;        /* [boot] keys that found no slot */
+
+static void reserve_bootargs(u32 want)
 {
-    const u32 bytes = ARGS_CAP * ARGS_STRIDE;
-    u32 i;
+    u32 cap = want < ARGS_MIN ? ARGS_MIN : (want > ARGS_MAX ? ARGS_MAX : want);
+    u32 bytes, i;
 
+    /* Too big for what is left: the old 16 still beats no table at all. */
+    if (shim_next - (cap * ARGS_STRIDE + 8u) < mod_next + 16u)
+        cap = ARGS_MIN;
+    bytes = cap * ARGS_STRIDE + 8u;
     if (shim_next - bytes < mod_next + 16u)
         return;
     shim_next -= bytes;
 
     for (i = 0; i < bytes; ++i)
         ((volatile u8 *)shim_next)[i] = 0;
+    ((volatile u32 *)shim_next)[0] = ARGS_CAP_MAGIC;
+    ((volatile u32 *)shim_next)[1] = cap;
+    args_cap = cap;
 
     if (g_shim->magic != MC3_SHIM_MAGIC) {
         g_shim->magic = MC3_SHIM_MAGIC;
@@ -472,7 +505,7 @@ static void reserve_bootargs(void)
         g_shim->hits = 0;
         g_shim->base = 0;
     }
-    g_shim->args_base = shim_next;
+    g_shim->args_base = shim_next + 8u;
     g_shim->args_n = 0;             /* how many are actually SET, not the cap */
 }
 
@@ -508,7 +541,7 @@ static volatile u8 *bootarg_slot(u32 id, int make)
     volatile u8 *empty = 0;
     if (g_shim->magic != MC3_SHIM_MAGIC || !g_shim->args_base)
         return 0;
-    for (i = 0; i < ARGS_CAP; ++i) {
+    for (i = 0; i < args_cap; ++i) {
         volatile u8 *rec = (volatile u8 *)(g_shim->args_base + i * ARGS_STRIDE);
         volatile u32 *idp = (volatile u32 *)rec;
         if (*idp == id) return rec;
@@ -522,7 +555,12 @@ static void bootarg_set(const char *key, const char *value)
     const u32 id = bootarg_id(key);
     volatile u8 *rec = bootarg_slot(id, 1);
     u32 i;
-    if (!rec) return;                /* full, or the table did not fit at boot */
+    if (!rec) {                      /* full, or the table did not fit at boot */
+        ++args_dropped;
+        scr_printf("  ini      [boot] %s dropped: the table holds %u keys\n",
+                   key, args_cap);
+        return;
+    }
     for (i = 0; i < ARGS_VALLEN - 1u && value[i]; ++i)
         rec[4u + i] = (u8)value[i];
     rec[4u + i] = 0;
@@ -552,8 +590,12 @@ static void bootarg_set(const char *key, const char *value)
  *  ArgHash - nothing here duplicates that logic, it only builds the array
  *  Init already knows how to read.
  * ------------------------------------------------------------------------- */
-#define NATIVE_ARGS_CAP    16u
 #define NATIVE_ARG_LEN     48u   /* "-maxopponents=whatever", NUL included */
+
+/* Sized like the [boot] table, max(16, key count): every [boot] line lands in
+ * both. Nothing reads a capacity here - argv[] is zero-terminated, so a reader
+ * stops at the terminator however long the array is. */
+static u32 nativeargs_cap = 0;
 
 /* How many argv[] slots are filled so far. Kept here rather than as another
  * shim-header field - see the field's own comment on why only one more word
@@ -562,14 +604,18 @@ static void bootarg_set(const char *key, const char *value)
  * conventions where a NULL terminator makes the array self-describing. */
 static u32 nativeargs_n = 0;
 
-static void reserve_nativeargs(void)
+static void reserve_nativeargs(u32 want)
 {
-    const u32 pool_bytes = NATIVE_ARGS_CAP * NATIVE_ARG_LEN;
-    const u32 argv_bytes = (NATIVE_ARGS_CAP + 1u) * 4u;  /* +1: the NULL terminator slot */
-    u32 i;
+    u32 cap = want < ARGS_MIN ? ARGS_MIN : (want > ARGS_MAX ? ARGS_MAX : want);
+    u32 pool_bytes, argv_bytes, i;
 
+    if (shim_next - (cap * NATIVE_ARG_LEN + (cap + 1u) * 4u) < mod_next + 16u)
+        cap = ARGS_MIN;
+    pool_bytes = cap * NATIVE_ARG_LEN;
+    argv_bytes = (cap + 1u) * 4u;   /* +1: the NULL terminator slot */
     if (shim_next - (pool_bytes + argv_bytes) < mod_next + 16u)
         return;
+    nativeargs_cap = cap;
     shim_next -= argv_bytes;
     for (i = 0; i < argv_bytes / 4u; ++i) ((volatile u32 *)shim_next)[i] = 0;
     g_shim->argv_base = shim_next;
@@ -594,11 +640,11 @@ static void nativearg_add(const char *key, const char *value)
 {
     u32 pool, slot, n, i, j;
 
-    if (!g_shim->argv_base || nativeargs_n >= NATIVE_ARGS_CAP)
+    if (!g_shim->argv_base || nativeargs_n >= nativeargs_cap)
         return;                          /* table did not fit, or is full */
 
     n = nativeargs_n;
-    pool = g_shim->argv_base - NATIVE_ARGS_CAP * NATIVE_ARG_LEN;
+    pool = g_shim->argv_base - nativeargs_cap * NATIVE_ARG_LEN;
     slot = pool + n * NATIVE_ARG_LEN;
 
     j = 0;
@@ -993,13 +1039,54 @@ static int shim_add(const char *path, u8 mode)
     return 1;
 }
 
+static const char *INI_PATHS[] = {
+    "host0:mc3boot.ini", "cdrom0:\\MC3BOOT.INI;1", "mass0:/mc3boot.ini", 0
+};
+
+/* How many `key = value` lines the [boot] section holds, so the two tables
+ * that take them can be sized before read_ini fills them - see
+ * reserve_bootargs for why they are sized at all instead of fixed. Reads the
+ * file on its own and changes nothing in it (read_ini cuts its copy into
+ * lines in place, so it reads again). A key written twice counts twice: the
+ * table ends up one slot bigger than it needs, never one smaller. */
+static u32 count_boot_keys(void)
+{
+    const char *name, *p, *e, *q;
+    int fd, n;
+    u32 keys = 0;
+    int in_boot = 0;
+
+    fd = open_first(INI_PATHS, &name);
+    if (fd < 0) return 0;
+    n = (int)read(fd, ini_buf, INI_MAX);
+    close(fd);
+    if (n <= 0) return 0;
+    ini_buf[n] = 0;
+
+    for (p = ini_buf; *p; p = *e ? e + 1 : e) {
+        for (e = p; *e && *e != '\n'; ++e) { }
+        while (p < e && (*p == ' ' || *p == '\t')) ++p;
+        if (p == e || *p == ';' || *p == '#') continue;
+        if (*p == '[') {
+            /* the same name read_ini compares: between '[' and ']', trimmed */
+            const char *s = p + 1, *t;
+            for (t = s; t < e && *t != ']'; ++t) { }
+            while (s < t && (*s == ' ' || *s == '\t')) ++s;
+            while (t > s && (t[-1] == ' ' || t[-1] == '\t' || t[-1] == '\r')) --t;
+            in_boot = (t - s == 4 && !strncmp(s, "boot", 4));
+            continue;
+        }
+        if (!in_boot) continue;
+        for (q = p; q < e && *q != '='; ++q) { }
+        if (q < e) ++keys;
+    }
+    return keys;
+}
+
 /* Returns the payload feature flags, defaulting to what the payload was built
  * with so that no .ini and the old behaviour are the same thing. */
 static u32 read_ini(u32 flags)
 {
-    static const char *INI_PATHS[] = {
-        "host0:mc3boot.ini", "cdrom0:\\MC3BOOT.INI;1", "mass0:/mc3boot.ini", 0
-    };
     const char *name;
     char *p, *fim, *sec = "";
     int fd, n, applied = 0, ignored = 0;
@@ -1250,8 +1337,11 @@ int main(int argc, char *argv[])
      * module's hooks are live from boot - so the export table has to exist
      * before the first one of them can run. */
     reserve_registry();
-    reserve_bootargs();
-    reserve_nativeargs();
+    {
+        const u32 keys = count_boot_keys();
+        reserve_bootargs(keys);
+        reserve_nativeargs(keys);
+    }
 
     flags = read_ini(flags);
     *(volatile u32 *)MC3_CFG       = MC3_CFG_MAGIC;
@@ -1340,6 +1430,8 @@ int main(int argc, char *argv[])
     sio_puts(" args=");           sio_hex(g_shim->magic == MC3_SHIM_MAGIC
                                           ? g_shim->args_n : 0u, 3);
     sio_puts(" argv=");           sio_hex(nativeargs_n, 3);
+    sio_puts(" acap=");           sio_hex(args_cap, 3);
+    sio_puts(" adrop=");          sio_hex(args_dropped, 3);
     sio_puts(" hooks=");          sio_hex((u32)hook_count, 3);
     sio_puts(" mods=");           sio_hex((u32)mod_loaded, 3);
     sio_puts("\n");

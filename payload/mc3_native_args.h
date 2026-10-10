@@ -55,7 +55,10 @@
  * never stored - argv[] is zero-terminated instead, one more entry than its
  * advertised capacity, and a reader counts up to the terminator itself. */
 #define MC3_ARGV_BASE     (((volatile mc3_u32 *)MC3_REG_HDR)[11])
-#define MC3_ARGV_CAP      16u
+/* Only a guard now: mc3boot.c sizes argv[] to the [boot] section (16 at the
+ * least, see reserve_nativeargs) and the zero terminator is what ends it.
+ * Was 16, the old fixed size, which hid every key past the 16th from Init. */
+#define MC3_ARGV_CAP      1024u
 
 /* Returns argc and *argv_out = the argv[] base, or 0 if [boot] set nothing
  * (an empty [boot] section, or none at all - the ordinary case). Both are

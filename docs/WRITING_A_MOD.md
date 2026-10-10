@@ -297,6 +297,21 @@ has a real libc and can afford `strncmp` freely. The `.mod` reading it back
 never touches a string literal of its own, so it never becomes a second data
 base — only *authoring* one does.
 
+### How many keys
+
+The table holds as many keys as `[boot]` has, 16 at the least and 128 at
+most. Until October 2026 it was a fixed 16, and every key after the 16th was
+dropped without a word. A module built back then still has `mc3_bootarg`
+looping to a constant 16. It keeps working, but it only sees the first 16
+keys of the section, so rebuild it against the current `mc3_bootargs.h` if
+one of its keys can land further down. The current header reads the capacity
+from the two words below the table (`'ACAP'`, then the slot count), and falls
+back to 16 under an older loader. If a key still does not fit, mc3boot prints
+`[boot] <key> dropped` on its boot screen and `adrop=` in the `MC3ARENA` line
+on the SIO counts the drops. The `MC3ARENA` line also reports the capacity as
+`acap=`. Each slot past 16 costs 88 bytes of the cave (36 for the table, 52
+for the native argv).
+
 ### The bug this shape avoids finding twice
 
 `city_force` resolves `[boot] city`'s text against the live city table by

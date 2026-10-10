@@ -53,6 +53,25 @@
 #define MC3_ARGS_BASE   (((volatile mc3_u32 *)MC3_REG_HDR)[9])
 #define MC3_ARGS_N      (((volatile mc3_u32 *)MC3_REG_HDR)[10])
 
+/* How many slots the table has. mc3boot.c sizes it to the [boot] section -
+ * never fewer than 16 - and writes {MC3_ARGS_CAP_MAGIC, capacity} in the two
+ * words right below args_base (the shim header has no word left for it).
+ * Under a loader older than that, those two words are the tail of the native
+ * argv[] array, never the magic, and the table is the old fixed 16. The
+ * upper bound only guards against reading a wild capacity. */
+#define MC3_ARGS_CAP_MAGIC MC3_ID('A','C','A','P')
+#define MC3_ARGS_CAP_OLD   16u
+#define MC3_ARGS_CAP_MAX   1024u
+
+static mc3_u32 mc3_bootarg_cap(mc3_u32 base)
+{
+    const volatile mc3_u32 *pre = (const volatile mc3_u32 *)(base - 8u);
+    if (pre[0] == MC3_ARGS_CAP_MAGIC &&
+        pre[1] >= MC3_ARGS_CAP_OLD && pre[1] <= MC3_ARGS_CAP_MAX)
+        return pre[1];
+    return MC3_ARGS_CAP_OLD;
+}
+
 /* Returns a pointer to the value's first byte in the cave, or 0 if the key was
  * never set this boot (no [boot] section, or this key absent from it). The
  * string is NUL-terminated and at most MC3_ARGS_VALLEN-1 bytes; mc3boot.c
@@ -60,7 +79,7 @@
 static const char *mc3_bootarg(mc3_u32 id)
 {
     const volatile mc3_u32 *h = (const volatile mc3_u32 *)MC3_REG_HDR;
-    mc3_u32 base, i;
+    mc3_u32 base, cap, i;
     if (h[0] != MC3_REG_MAGIC)
         return 0;
     base = MC3_ARGS_BASE;
@@ -68,9 +87,11 @@ static const char *mc3_bootarg(mc3_u32 id)
         return 0;
     /* Capacity, not MC3_ARGS_N: N counts how many are SET, which can be lower
      * than the table's size, but a slot's own id (0 = free) is what actually
-     * tells a search where to stop looking. 16 is boot/mc3boot.c's ARGS_CAP;
-     * duplicated here because the payload side has no generated header. */
-    for (i = 0; i < 16u; ++i) {
+     * tells a search where to stop looking. A module built when this was a
+     * constant 16 still works under the bigger table - it just never sees the
+     * keys past the 16th - so only a module that needs those is rebuilt. */
+    cap = mc3_bootarg_cap(base);
+    for (i = 0; i < cap; ++i) {
         const volatile mc3_u32 *rec =
             (const volatile mc3_u32 *)(base + i * MC3_ARGS_STRIDE);
         if (*rec == id)
